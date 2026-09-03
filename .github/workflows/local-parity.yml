@@ -1,0 +1,29 @@
+name: local parity fixture
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - name: Run local candidate
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/workspace"
+          --workdir /workspace
+          --env VERJSON_CI_PROVIDER=github
+          --env VERJSON_CI_SCENARIO="$SCENARIO"
+          "$VERJSON_CI_LOCAL_IMAGE"
+          run
+          --config "test/fixtures/$SCENARIO/verjson-ci.yml"
+          --output ".verjson-ci/local/$SCENARIO-github.json"

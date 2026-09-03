@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+scenario="${1:?scenario required}"
+image="${2:?local image required}"
+case "$scenario" in
+  success|failure) ;;
+  *) echo "scenario must be success or failure" >&2; exit 2 ;;
+esac
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+project="verjson-ci-parity-$$"
+export COMPOSE_PROJECT_NAME="$project"
+export VERJSON_CI_GITLAB_ROOT_PASSWORD="$(openssl rand -hex 24)"
+export VERJSON_CI_GITLAB_PORT="$((18080 + $$ % 1000))"
+export VERJSON_CI_REGISTRY_PORT="$((20080 + $$ % 1000))"
+api_token="glpat-$(openssl rand -hex 20)"
+state="$root/.verjson-ci/local/gitlab-$scenario"
+
+cleanup() {
+  if [ "${VERJSON_CI_KEEP_LOCAL:-false}" = true ]; then
+    echo "Retained disposable GitLab compose project $COMPOSE_PROJECT_NAME for diagnosis" >&2
+    return
+  fi
+  docker compose --file "$root/dev/compose.yml" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "$state"
+}
+trap cleanup EXIT
+
+mkdir -p "$state"
+docker compose --file "$root/dev/compose.yml" up --detach --wait registry gitlab
+registry_image="127.0.0.1:${VERJSON_CI_REGISTRY_PORT}/verjson-ci:local"
+docker tag "$image" "$registry_image"
+docker push "$registry_image" >/dev/null
+image="$(docker image inspect "$registry_image" \
+  --format '{{range .RepoDigests}}{{println .}}{{end}}' | \
+  grep "^127.0.0.1:${VERJSON_CI_REGISTRY_PORT}/verjson-ci@sha256:" | head -1)"
+[ -n "$image" ] || { echo "Local registry did not return an image digest" >&2; exit 1; }
+
+docker compose --file "$root/dev/compose.yml" exec -T \
+  --env VERJSON_CI_API_TOKEN="$api_token" \
+  gitlab gitlab-rails runner "
+    user = User.find_by_username!('root')
+    project = Projects::CreateService.new(user, {
+      name: '$project',
+      namespace_id: user.namespace.id,
+      organization_id: Organizations::Organization.default_organization.id,
+      visibility_level: Gitlab::VisibilityLevel::PRIVATE
+    }).execute
+    project.update!(auto_devops_enabled: false)
+    project.variables.create!(key: 'VERJSON_CI_LOCAL_IMAGE', value: '$image')
+    project.variables.create!(key: 'VERJSON_CI_SCENARIO', value: '$scenario')
+    token = user.personal_access_tokens.create!(
+      name: '$project', scopes: [:api], expires_at: Date.tomorrow
+    )
+    token.set_token(ENV.fetch('VERJSON_CI_API_TOKEN'))
+    token.save!
+    runner = Ci::Runner.new(
+      runner_type: :project_type,
+      description: '$project',
+      organization_id: Organizations::Organization.default_organization.id
+    )
+    runner.projects << project
+    runner.save!
+    File.write('/tmp/verjson-ci-bootstrap', [project.id, runner.token].join(10.chr))
+  "
+
+docker compose --file "$root/dev/compose.yml" cp \
+  gitlab:/tmp/verjson-ci-bootstrap "$state/bootstrap" >/dev/null
+project_id="$(sed -n '1p' "$state/bootstrap")"
+runner_token="$(sed -n '2p' "$state/bootstrap")"
+
+docker compose --file "$root/dev/compose.yml" run --rm --no-deps runner register \
+  --non-interactive \
+  --url http://gitlab.local \
+  --token "$runner_token" \
+  --executor docker \
+  --docker-image "$image" \
+  --docker-network-mode "${COMPOSE_PROJECT_NAME}_default" \
+  --docker-pull-policy if-not-present
+docker compose --file "$root/dev/compose.yml" up --detach runner
+
+printf '%s\n' '#!/usr/bin/env sh' 'printf '\''%s\n'\'' "$VERJSON_CI_GITLAB_PUSH_TOKEN"' >"$state/askpass"
+chmod 700 "$state/askpass"
+
+snapshot="$state/repository"
+git clone --quiet --no-hardlinks "$root" "$snapshot"
+git -C "$root" ls-files --cached --others --exclude-standard -z | \
+  tar --directory="$root" --null --files-from=- --create | \
+  tar --extract --directory="$snapshot"
+sed -i \
+  -e "s|\$VERJSON_CI_LOCAL_IMAGE|$image|" \
+  -e "s|\$VERJSON_CI_SCENARIO|$scenario|" \
+  "$snapshot/.gitlab-ci.yml"
+git -C "$snapshot" add --all
+git -C "$snapshot" -c user.name=verjson-ci-local -c user.email=local@invalid \
+  commit --quiet --allow-empty --message "test: local parity snapshot"
+VERJSON_CI_GITLAB_PUSH_TOKEN="$api_token" \
+  GIT_ASKPASS="$state/askpass" GIT_ASKPASS_REQUIRE=force git -C "$snapshot" push \
+  "http://127.0.0.1:${VERJSON_CI_GITLAB_PORT}/root/${project}.git" \
+  "HEAD:refs/heads/local-parity-$scenario" >/dev/null
+
+api="http://127.0.0.1:${VERJSON_CI_GITLAB_PORT}/api/v4"
+branch="local-parity-$scenario"
+pipeline_id=''
+for _ in $(seq 1 60); do
+  pipeline_id="$(curl --fail --silent --header "PRIVATE-TOKEN: $api_token" \
+    "$api/projects/$project_id/pipelines?ref=$branch" | jq -r '.[0].id // empty')"
+  [ -n "$pipeline_id" ] && break
+  sleep 2
+done
+[ -n "$pipeline_id" ] || { echo "GitLab did not create local parity pipeline" >&2; exit 1; }
+
+status=''
+for _ in $(seq 1 120); do
+  status="$(curl --fail --silent --header "PRIVATE-TOKEN: $api_token" \
+    "$api/projects/$project_id/pipelines/$pipeline_id" | jq -r .status)"
+  case "$status" in
+    success|failed|canceled) break ;;
+  esac
+  sleep 2
+done
+
+expected=success
+[ "$scenario" = failure ] && expected=failed
+if [ "$status" != "$expected" ]; then
+  echo "GitLab local pipeline result=$status expected=$expected" >&2
+  while IFS=$'\t' read -r failed_job_id failed_job_name failed_job_status; do
+    echo "--- GitLab job $failed_job_name ($failed_job_status) ---" >&2
+    curl --fail --silent --header "PRIVATE-TOKEN: $api_token" \
+      "$api/projects/$project_id/jobs/$failed_job_id/trace" >&2 || true
+  done < <(curl --fail --silent --header "PRIVATE-TOKEN: $api_token" \
+    "$api/projects/$project_id/pipelines/$pipeline_id/jobs" | \
+    jq -r '.[] | [.id, .name, .status] | @tsv')
+  exit 1
+fi
+
+job_id="$(curl --fail --silent --header "PRIVATE-TOKEN: $api_token" \
+  "$api/projects/$project_id/pipelines/$pipeline_id/jobs" | \
+  jq -r '.[] | select(.name == "parity-fixture") | .id')"
+[ -n "$job_id" ] || { echo "GitLab parity fixture job missing" >&2; exit 1; }
+curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
+  "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
+  --output "$root/.verjson-ci/local/$scenario-gitlab.json"

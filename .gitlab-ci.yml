@@ -1,0 +1,6 @@
+include:
+  - local: /templates/ci.yml
+    inputs:
+      image: $VERJSON_CI_LOCAL_IMAGE
+      config: test/fixtures/$VERJSON_CI_SCENARIO/verjson-ci.yml
+      job-name: parity-fixture

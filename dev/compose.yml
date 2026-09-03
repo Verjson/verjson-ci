@@ -1,0 +1,41 @@
+services:
+  registry:
+    image: registry:2.8.3
+    ports:
+      - "127.0.0.1:${VERJSON_CI_REGISTRY_PORT:?required}:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+  gitlab:
+    image: gitlab/gitlab-ce:18.4.1-ce.0
+    hostname: gitlab.local
+    shm_size: 256m
+    environment:
+      VERJSON_CI_GITLAB_ROOT_PASSWORD: ${VERJSON_CI_GITLAB_ROOT_PASSWORD:?required}
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab.local'
+        gitlab_rails['initial_root_password'] = ENV.fetch('VERJSON_CI_GITLAB_ROOT_PASSWORD')
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/-/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+    ports:
+      - "127.0.0.1:${VERJSON_CI_GITLAB_PORT:?required}:80"
+    networks:
+      default:
+        aliases: [gitlab.local]
+  runner:
+    image: gitlab/gitlab-runner:alpine-v18.4.0
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-config:/etc/gitlab-runner
+
+volumes:
+  registry-data:
+  runner-config:
