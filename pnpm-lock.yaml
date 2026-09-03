@@ -23,6 +23,8 @@ importers:
 
   packages/schema: {}
 
+  packages/shadscan: {}
+
 packages:
 
   ajv@8.17.1:

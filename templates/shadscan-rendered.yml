@@ -1,0 +1,24 @@
+spec:
+  inputs:
+    image:
+      description: Preview tooling image pinned by digest.
+      regex: '^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$'
+    url:
+      description: Already-running preview URL to inspect.
+    job-name:
+      description: Name of the generated preview job.
+      default: shadscan-rendered
+---
+"$[[ inputs.job-name ]]":
+  image:
+    name: $[[ inputs.image ]]
+    entrypoint: [""]
+  script:
+    - corepack enable
+    - pnpm dlx @shadscan/cli@0.17.0 --check-ui "$SHADSCAN_URL" --json > shadscan-rendered.json
+  variables:
+    SHADSCAN_URL: $[[ inputs.url ]]
+  artifacts:
+    when: always
+    paths:
+      - shadscan-rendered.json

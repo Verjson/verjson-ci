@@ -45,5 +45,5 @@ jobs:
         if: always()
         with:
           name: verjson-ci-result
-          path: .verjson-ci/result.json
+          path: .verjson-ci/*.json
           if-no-files-found: error

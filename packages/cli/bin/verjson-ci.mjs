@@ -18,6 +18,7 @@ try {
     imageDigest: process.env.VERJSON_CI_IMAGE_DIGEST,
     provider: process.env.VERJSON_CI_PROVIDER,
     scenario: process.env.VERJSON_CI_SCENARIO,
+    shadscanReportPath: resolve(dirname(args.output), 'shadscan-report.json'),
   });
   const output = serializeCanonicalResult(result);
   await mkdir(dirname(args.output), { recursive: true });

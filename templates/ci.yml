@@ -24,3 +24,4 @@ spec:
     when: always
     paths:
       - .verjson-ci/result.json
+      - .verjson-ci/shadscan-report.json

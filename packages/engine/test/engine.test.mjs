@@ -22,3 +22,29 @@ test('classifies command timeout', async () => {
 
   assert.equal(result.outcome, 'timeout');
 });
+
+test('includes ShadScan threshold semantics in the provider-neutral result', async () => {
+  const result = await executeContract({
+    schema: 1,
+    commands: { test: 'true' },
+    checks: { shadscan: { mode: 'auto', version: '0.17.0', 'fail-under': 80, baseline: 85 } },
+  }, {
+    stdio: 'ignore',
+    shadscan: {
+      files: { access: async () => {}, readFile: async () => JSON.stringify({ dependencies: { react: '19' } }) },
+      run: async () => ({ code: 0, stdout: JSON.stringify({ schemaVersion: 1, coverage: { source: 'complete' }, score: 90, findings: [] }), stderr: '' }),
+    },
+  });
+
+  assert.equal(result.outcome, 'success');
+  assert.deepEqual(result.capabilities.shadscan, {
+    applicable: true,
+    outcome: 'success',
+    reason: undefined,
+    version: '0.17.0',
+    reportSchema: 1,
+    score: 90,
+    findings: 0,
+    threshold: 85,
+  });
+});
