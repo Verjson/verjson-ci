@@ -8,5 +8,89 @@ This repository implements the unified CI architecture governed by
 The contract schema, provider-neutral engine, CLI, OCI image, GitHub adapter, GitLab
 adapter, conformance fixtures, and release tooling share one repository and version.
 
-The project is being bootstrapped under
-[issue #1](https://github.com/Verjson/verjson-ci/issues/1). No stable release exists yet.
+No stable release exists yet. Until the signed release pipeline is complete, examples use
+placeholders rather than a mutable branch or image tag.
+
+## Portable contract
+
+```yaml
+schema: 1
+stack: node
+runtime:
+  node: '24'
+  package-manager: pnpm
+commands:
+  verify: pnpm check
+checks:
+  shadscan:
+    mode: auto
+    version: 0.17.0
+    fail-under: 70
+    baseline: 82
+```
+
+Both adapters execute this contract through the same OCI image and produce the same
+normalized `.verjson-ci/result.json`. ShadScan's complete versioned report is retained as
+`.verjson-ci/shadscan-report.json` when applicable.
+
+## Local development
+
+Install Node 24, pnpm, Docker, and [`act`](https://nektosact.com/). Then run:
+
+```bash
+pnpm install
+pnpm check
+pnpm parity:local --changed
+```
+
+Schema changes automatically select both success and failure fixtures. The harness builds
+one local OCI candidate, runs the GitHub entrypoint with `act`, and runs all selected GitLab
+fixtures through one disposable GitLab CE project and runner. It destroys credentials,
+volumes, and networks on exit.
+
+## Consumption
+
+Every public reference below must use the same unprefixed SemVer `<version>`, and
+`<image-digest>` must be the OCI digest recorded by that release's signed complete manifest.
+
+GitHub composite Action:
+
+```yaml
+- uses: Verjson/verjson-ci/adapters/github/action@<version>
+  with:
+    image: ghcr.io/verjson/verjson-ci@<image-digest>
+```
+
+GitHub reusable workflow:
+
+```yaml
+jobs:
+  ci:
+    uses: Verjson/verjson-ci/.github/workflows/reusable-ci.yml@<version>
+    with:
+      image: ghcr.io/verjson/verjson-ci@<image-digest>
+```
+
+GitLab instances first mirror the canonical tag with `terraform/gitlab-mirror` and
+`tools/mirror/sync.mjs`, then consume the internal component:
+
+```yaml
+include:
+  - component: $CI_SERVER_FQDN/platform/verjson-ci/ci@<version>
+    inputs:
+      image: ghcr.io/verjson/verjson-ci@<image-digest>
+```
+
+Never combine a CLI, Action, workflow, component, schema, or image from different release
+manifests. GitHub remains a tested fallback when GitLab is the primary forge.
+
+## Delivery status
+
+- Local engine, adapters, ShadScan, and real `act`/GitLab CE parity are implemented.
+- Cross-forge OIDC and signed-release controls are under mandatory security review in
+  [PR #11](https://github.com/Verjson/verjson-ci/pull/11) and
+  [PR #17](https://github.com/Verjson/verjson-ci/pull/17).
+- External GitLab mirror provisioning is under mandatory review in
+  [PR #15](https://github.com/Verjson/verjson-ci/pull/15).
+- The first public release is blocked on the license decision in
+  [issue #4](https://github.com/Verjson/verjson-ci/issues/4).
