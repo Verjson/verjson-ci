@@ -1,0 +1,41 @@
+name: remote cross-forge parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      coordinator-url:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+      scenario:
+        required: true
+        type: choice
+        options: [success, failure]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dispatch-gitlab:
+    runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || github.event.repository.private == true && fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - name: Exchange GitHub OIDC identity for GitLab dispatch
+        env:
+          COORDINATOR_URL: ${{ inputs['coordinator-url'] }}
+          IMAGE: ${{ inputs.image }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          set -euo pipefail
+          token="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=verjson-ci-conformance" | jq -r .value)"
+          capability="$(jq -n --arg token "$token" '{token:$token}' | curl --fail --silent --show-error \
+            --header 'content-type: application/json' --data-binary @- \
+            "$COORDINATOR_URL/v1/authorize/github" | jq -r .capability)"
+          jq -n --arg image "$IMAGE" --arg scenario "$SCENARIO" --arg commit "$GITHUB_SHA" \
+            '{image:$image,scenario:$scenario,commit:$commit}' | curl --fail --silent --show-error \
+            --header 'content-type: application/json' --header "Authorization: Bearer $capability" \
+            --data-binary @- "$COORDINATOR_URL/v1/dispatch"

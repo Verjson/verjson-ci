@@ -7,8 +7,10 @@ test('adapter entrypoints are valid YAML documents', async () => {
   for (const path of [
     'adapters/github/action/action.yml',
     '.github/workflows/reusable-ci.yml',
+    '.github/workflows/remote-parity.yml',
     '.github/workflows/shadscan-rendered.yml',
     'templates/ci.yml',
+    'templates/remote-parity.yml',
     'templates/shadscan-rendered.yml',
   ]) {
     const documents = parseAllDocuments(await readFile(path, 'utf8'));

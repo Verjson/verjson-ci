@@ -9,6 +9,7 @@ const policy = {
   audience: 'verjson-ci-conformance',
   jwks: 'https://token.actions.githubusercontent.com/.well-known/jwks',
   capabilityTtlMs: 60_000,
+  dispatchForge: 'gitlab',
   claims: {
     repository: 'Verjson/verjson-ci',
     ref_protected: 'true',
@@ -38,7 +39,7 @@ test('authorizes exact protected workflow claims and dispatches once', async () 
   const grant = await coordinator.authorize('token', 'github');
 
   assert.deepEqual(await coordinator.dispatch(grant.capability, { scenario: 'success' }), {
-    forge: 'github', request: { scenario: 'success' },
+    forge: 'gitlab', request: { scenario: 'success' },
   });
   await assert.rejects(() => coordinator.dispatch(grant.capability, {}), AuthorizationError);
 });

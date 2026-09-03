@@ -48,7 +48,7 @@ export class OidcCoordinator {
 
     const capability = randomUUID();
     const expiresAt = Math.min(claims.exp * 1000, this.clock() + policy.capabilityTtlMs);
-    await this.capabilityStore.put(capability, { forge, expiresAt });
+    await this.capabilityStore.put(capability, { forge: policy.dispatchForge, expiresAt });
     return { capability, expiresAt };
   }
 
