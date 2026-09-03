@@ -7,11 +7,25 @@ test('adapter entrypoints are valid YAML documents', async () => {
   for (const path of [
     'adapters/github/action/action.yml',
     '.github/workflows/reusable-ci.yml',
+    '.github/workflows/shadscan-rendered.yml',
     'templates/ci.yml',
+    'templates/shadscan-rendered.yml',
   ]) {
     const documents = parseAllDocuments(await readFile(path, 'utf8'));
     assert.equal(documents.some((document) => document.errors.length > 0), false, path);
   }
+});
+
+test('rendered ShadScan lanes pin the same CLI and stay separate from static CI', async () => {
+  const github = await readFile('.github/workflows/shadscan-rendered.yml', 'utf8');
+  const gitlab = await readFile('templates/shadscan-rendered.yml', 'utf8');
+
+  for (const adapter of [github, gitlab]) {
+    assert.match(adapter, /@shadscan\/cli@0\.17\.0/);
+    assert.match(adapter, /--check-ui/);
+    assert.match(adapter, /shadscan-rendered\.json/);
+  }
+  assert.doesNotMatch(await readFile('templates/ci.yml', 'utf8'), /--check-ui/);
 });
 
 test('both adapters invoke the same result path and provider-neutral CLI command', async () => {

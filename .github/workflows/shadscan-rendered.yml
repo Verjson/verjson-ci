@@ -1,0 +1,34 @@
+name: ShadScan rendered preview
+
+on:
+  workflow_call:
+    inputs:
+      url:
+        description: Already-running preview URL to inspect.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Already-running preview URL to inspect.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rendered:
+    runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || github.event.repository.private == true && fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Scan already-running preview
+        env:
+          SHADSCAN_URL: ${{ inputs.url }}
+        run: pnpm dlx @shadscan/cli@0.17.0 --check-ui "$SHADSCAN_URL" --json > shadscan-rendered.json
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shadscan-rendered
+          path: shadscan-rendered.json
+          if-no-files-found: error

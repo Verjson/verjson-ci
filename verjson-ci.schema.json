@@ -38,8 +38,9 @@
               "required": ["mode", "version", "fail-under"],
               "properties": {
                 "mode": { "enum": ["auto", "required"] },
-                "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
-                "fail-under": { "type": "integer", "minimum": 0, "maximum": 100 }
+                "version": { "const": "0.17.0" },
+                "fail-under": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "baseline": { "type": "integer", "minimum": 0, "maximum": 100 }
               }
             }
           ]

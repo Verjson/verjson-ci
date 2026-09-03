@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { executeShadscan } from '../../shadscan/src/index.mjs';
+
 export async function executeContract(contract, options = {}) {
   const commands = [];
   const timeoutMs = options.timeoutMs ?? 15 * 60 * 1000;
@@ -12,7 +14,13 @@ export async function executeContract(contract, options = {}) {
     }
   }
 
-  return buildResult(contract, commands, 'success', options);
+  const shadscan = await executeShadscan(contract.checks?.shadscan, {
+    cwd: options.cwd,
+    reportPath: options.shadscanReportPath,
+    ...options.shadscan,
+  });
+  const outcome = shadscan.outcome === 'failure' ? 'failure' : 'success';
+  return buildResult(contract, commands, outcome, options, { shadscan });
 }
 
 function executeCommand(name, command, options) {
@@ -46,7 +54,7 @@ function executeCommand(name, command, options) {
   });
 }
 
-function buildResult(contract, commands, outcome, options) {
+function buildResult(contract, commands, outcome, options, capabilities = {}) {
   return {
     resultSchema: 1,
     contractSchema: contract.schema,
@@ -57,6 +65,7 @@ function buildResult(contract, commands, outcome, options) {
     scenario: options.scenario ?? 'default',
     provider: options.provider ?? 'local',
     commands,
+    capabilities,
     outcome,
   };
 }
