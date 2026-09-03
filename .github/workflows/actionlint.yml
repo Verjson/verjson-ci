@@ -1,0 +1,11 @@
+name: actionlint
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    uses: Verjson/.github/.github/workflows/actionlint.yml@e80cac20e6f95f81723490cb929f48eac419c434

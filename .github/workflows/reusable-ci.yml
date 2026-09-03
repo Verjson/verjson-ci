@@ -1,0 +1,49 @@
+name: verjson-ci
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: OCI image reference pinned by digest.
+        required: true
+        type: string
+      config:
+        description: Repository-relative contract path.
+        required: false
+        default: verjson-ci.yml
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || github.event.repository.private == true && fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate immutable image identity
+        env:
+          VERJSON_CI_IMAGE: ${{ inputs.image }}
+        run: |
+          [[ "$VERJSON_CI_IMAGE" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::image must be an OCI repository reference pinned by sha256 digest"
+            exit 2
+          }
+      - name: Run verjson-ci
+        env:
+          VERJSON_CI_CONFIG: ${{ inputs.config }}
+          VERJSON_CI_IMAGE: ${{ inputs.image }}
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/workspace"
+          --workdir /workspace
+          --env VERJSON_CI_PROVIDER=github
+          --env VERJSON_CI_COMMIT="$GITHUB_SHA"
+          "$VERJSON_CI_IMAGE"
+          run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: verjson-ci-result
+          path: .verjson-ci/result.json
+          if-no-files-found: error

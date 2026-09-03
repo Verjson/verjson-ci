@@ -1,0 +1,21 @@
+{
+  "name": "@verjson/ci-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm --filter @verjson/ci build",
+    "check": "pnpm test && pnpm parity:projections",
+    "parity:local": "node dev/parity-local.mjs",
+    "parity:projections": "node --test test/parity/*.test.mjs",
+    "test": "node --test packages/*/test/*.test.mjs test/contract/*.test.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "yaml": "2.8.1"
+  }
+}
