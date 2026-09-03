@@ -28,6 +28,8 @@ importers:
 
   packages/engine: {}
 
+  packages/release: {}
+
   packages/result-contract: {}
 
   packages/schema: {}
