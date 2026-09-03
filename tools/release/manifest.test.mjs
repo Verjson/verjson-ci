@@ -12,7 +12,7 @@ const receipt = (forge, overrides = {}) => ({
 });
 const input = {
   version: '1.2.3', commit, imageReference: 'ghcr.io/verjson/verjson-ci', imageDigest,
-  cli: { path: 'verjson-ci-1.2.3.tgz', sha256: 'd'.repeat(64) },
+  cli: { version: '1.2.3', path: 'verjson-ci-1.2.3.tgz', sha256: 'd'.repeat(64) },
   receipts: { github: receipt('github'), gitlab: receipt('gitlab') },
 };
 
@@ -26,6 +26,7 @@ test('binds every release surface to one unprefixed version and artifact identit
 
 test('rejects prefixed versions and cross-forge receipt drift', () => {
   assert.throws(() => buildManifest({ ...input, version: 'v1.2.3' }), /unprefixed/);
+  assert.throws(() => buildManifest({ ...input, cli: { ...input.cli, version: '1.2.4' } }), /CLI version/);
   assert.throws(() => buildManifest({ ...input, receipts: { ...input.receipts, gitlab: receipt('gitlab', { resultDigest: `sha256:${'e'.repeat(64)}` }) } }), /digests differ/);
   assert.throws(() => buildManifest({ ...input, receipts: { ...input.receipts, gitlab: receipt('gitlab', { commit: 'f'.repeat(40) }) } }), /identity differs/);
 });

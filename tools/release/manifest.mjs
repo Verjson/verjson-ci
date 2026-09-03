@@ -11,6 +11,9 @@ export function buildManifest(input) {
   if (!SEMVER.test(input.version)) throw new Error('version must be unprefixed SemVer');
   if (!SHA.test(input.commit)) throw new Error('commit must be a full Git SHA');
   if (!DIGEST.test(input.imageDigest)) throw new Error('image digest must be sha256');
+  if (input.cli?.version !== input.version || !/^[0-9a-f]{64}$/.test(input.cli?.sha256 ?? '')) {
+    throw new Error('CLI version or integrity differs from release');
+  }
   const receipts = Object.fromEntries(['github', 'gitlab'].map((forge) => [forge, validateReceipt(input.receipts?.[forge], forge, input)]));
   if (receipts.github.requestId !== receipts.gitlab.requestId) throw new Error('receipt request IDs differ');
   if (receipts.github.resultDigest !== receipts.gitlab.resultDigest) throw new Error('receipt result digests differ');
