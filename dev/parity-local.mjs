@@ -32,9 +32,9 @@ for (const scenario of scenarios) {
     '--env',
     `VERJSON_CI_LOCAL_IMAGE=${image}`,
   ], scenario === 'failure' ? 1 : 0);
-  run(resolve(root, 'dev/gitlab/run-local'), [scenario, image]);
-  await compareScenario(scenario);
 }
+run(resolve(root, 'dev/gitlab/run-local'), [scenarios.join(','), image]);
+for (const scenario of scenarios) await compareScenario(scenario);
 
 process.stdout.write(`local parity passed: ${scenarios.join(', ')}\n`);
 
@@ -54,6 +54,7 @@ function parseArgs(args) {
 }
 
 function selectScenarios({ changed, scenario }) {
+  if (scenario === 'all') return ['success', 'failure'];
   const supported = new Set(['success', 'failure']);
   if (scenario) {
     if (!supported.has(scenario)) {

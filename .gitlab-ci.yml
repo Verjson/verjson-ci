@@ -1,3 +1,6 @@
+variables:
+  VERJSON_CI_SCENARIO: $VERJSON_CI_SCENARIO
+
 include:
   - local: /templates/ci.yml
     inputs:
