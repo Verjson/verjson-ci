@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+.act/
+.gitlab-local/
+.worktrees/
+.claude/worktrees/
+.claude/settings.local.json
+.claude/.headroom_wrap_marker.json
+AGENTS.md
+*.log
+*.tgz
