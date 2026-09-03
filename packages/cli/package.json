@@ -1,0 +1,12 @@
+{
+  "name": "@verjson/ci",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "verjson-ci": "bin/verjson-ci.mjs"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-cli.mjs"
+  }
+}

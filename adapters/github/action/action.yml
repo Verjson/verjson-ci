@@ -1,0 +1,35 @@
+name: verjson-ci
+description: Run the portable verjson-ci contract through its immutable OCI image.
+inputs:
+  image:
+    description: OCI image reference pinned by digest.
+    required: true
+  config:
+    description: Repository-relative contract path.
+    required: false
+    default: verjson-ci.yml
+runs:
+  using: composite
+  steps:
+    - name: Validate immutable image identity
+      shell: bash
+      env:
+        VERJSON_CI_IMAGE: ${{ inputs.image }}
+      run: |
+        [[ "$VERJSON_CI_IMAGE" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]] || {
+          echo "::error::image must be an OCI repository reference pinned by sha256 digest"
+          exit 2
+        }
+    - name: Run verjson-ci
+      shell: bash
+      env:
+        VERJSON_CI_IMAGE: ${{ inputs.image }}
+        VERJSON_CI_CONFIG: ${{ inputs.config }}
+      run: >-
+        docker run --rm
+        --volume "$GITHUB_WORKSPACE:/workspace"
+        --workdir /workspace
+        --env VERJSON_CI_PROVIDER=github
+        --env VERJSON_CI_COMMIT="$GITHUB_SHA"
+        "$VERJSON_CI_IMAGE"
+        run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json

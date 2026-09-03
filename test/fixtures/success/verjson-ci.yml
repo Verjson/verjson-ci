@@ -1,0 +1,7 @@
+schema: 1
+stack: node
+runtime:
+  node: '24'
+  package-manager: pnpm
+commands:
+  verify: node -e "process.exit(0)"

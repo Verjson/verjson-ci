@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://verjson.org/schemas/verjson-ci/v1",
+  "title": "verjson-ci contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "stack", "runtime", "commands"],
+  "properties": {
+    "schema": { "const": 1 },
+    "stack": { "enum": ["node"] },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "package-manager"],
+      "properties": {
+        "node": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+(?:\\.[0-9]+)?)?$" },
+        "package-manager": { "enum": ["npm", "pnpm"] }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changelog": { "enum": ["off", "optional", "required"] },
+        "actionlint": { "enum": ["off", "auto", "required"] },
+        "shadscan": {
+          "oneOf": [
+            { "enum": ["off", "auto"] },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "version", "fail-under"],
+              "properties": {
+                "mode": { "enum": ["auto", "required"] },
+                "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+                "fail-under": { "type": "integer", "minimum": 0, "maximum": 100 }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
