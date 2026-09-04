@@ -14,7 +14,7 @@ checks:
 
 `report` records control failures without changing the run outcome. `required` fails when a blocking control is `unsatisfied` or the percentage of satisfied controls falls below `baseline`. Missing evidence becomes `not-automated`; an explicitly inapplicable capability becomes `not-applicable`. Neither state is treated as satisfied.
 
-The CLI writes `.verjson-ci/compliance-evidence.json`. Evidence contains only normalized names, outcomes, exit status, applicability, and hashes. It excludes command text, environment values, file contents, timestamps, run identities, and provider URLs. Both adapters retain the file and the result envelope records its SHA-256 digest.
+The CLI writes `.verjson-ci/compliance-evidence.json`. Evidence contains only normalized names, outcomes, exit status, applicability, and hashes. It excludes command text, environment values, file contents, timestamps, run identities, and provider URLs. Dependency evidence uses no-follow metadata beneath the canonical repository root and accepts regular files only; directories, symlinks, and special files fail at the boundary. Both adapters retain the file and the result envelope records its SHA-256 digest.
 
 ## Pack authoring
 
@@ -35,4 +35,4 @@ A pack has a closed shape:
 
 Supported neutral mappings are `commands-all`, `file-any` with a bounded filename allowlist, and `capability` with a capability name. Add a framework by adding pack data, registering its digest, and exposing its exact identity in `verjson-ci.schema.json`; the engine and adapters do not change. Framework-specific interpretation belongs in pack data, not the resolver.
 
-Pack changes require schema, malformed-boundary, success, required-failure, and GitHub/GitLab projection tests. The parity boundary requires both artifacts to exist, verifies each digest, and then compares canonical bytes and control semantics. An absent pack, missing artifact, single forge leg, or digest mismatch fails closed.
+Pack changes require schema, malformed-boundary, missing-pack, success, required-failure, missing-evidence, and GitHub/GitLab projection tests. The local `act` and disposable GitLab CE matrix records the inner CLI exit code: malformed pack declarations and absent registered packs exit 2 without a semantic result, while required missing evidence exits 1 with matching unsatisfied controls. The parity boundary requires both evidence artifacts to exist, verifies each digest, and then compares canonical bytes and control semantics. An absent pack, missing artifact, single forge leg, or digest mismatch fails closed.

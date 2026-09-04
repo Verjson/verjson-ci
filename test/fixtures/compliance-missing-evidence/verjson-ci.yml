@@ -1,0 +1,14 @@
+schema: 1
+stack: node
+runtime:
+  node: '24'
+  package-manager: pnpm
+commands:
+  test: 'true'
+checks:
+  compliance:
+    frameworks:
+      - id: verjson-ci-foundation
+        version: 1.0.0
+    mode: required
+    baseline: 100

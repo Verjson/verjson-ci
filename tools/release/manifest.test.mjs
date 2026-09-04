@@ -20,3 +20,20 @@ test('binds the exact compliance pack catalog into the signed manifest', () => {
   const tampered = structuredClone(manifest); tampered.artifacts.compliance.packs[0].digest = `sha256:${'0'.repeat(64)}`;
   assert.throws(() => validateManifest(tampered), /catalog differs/);
 });
+test('emits v2 while retaining read and resume compatibility for durable v1 manifests', () => {
+  const current = buildManifest(input);
+  assert.equal(current.schemaVersion, 2);
+  const { compliance: _, ...legacyArtifacts } = current.artifacts;
+  const legacy = { ...current, schemaVersion: 1, artifacts: legacyArtifacts };
+  assert.equal(validateManifest(legacy), legacy);
+  const completed = completeManifest(legacy, REQUIRED_ENDPOINT_IDS);
+  assert.equal(completed.schemaVersion, 1);
+  assert.equal(completed.state, 'complete');
+});
+test('prevents v1 from claiming compliance and v2 from omitting it', () => {
+  const current = buildManifest(input);
+  assert.throws(() => validateManifest({ ...current, schemaVersion: 1 }), /schema invalid/);
+  const { compliance: _, ...artifacts } = current.artifacts;
+  assert.throws(() => validateManifest({ ...current, artifacts }), /schema invalid/);
+  assert.throws(() => validateManifest({ ...current, schemaVersion: 3 }), /unsupported schemaVersion/);
+});

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ComplianceBoundaryError, evaluateCompliance } from '../../compliance/src/index.mjs';
@@ -34,7 +34,10 @@ export async function executeContract(contract, options = {}) {
     const evaluated = await evaluateCompliance(complianceConfiguration, {
       commands,
       capabilities,
-      files: options.complianceFiles ?? await detectDependencyFiles(options.cwd ?? process.cwd(), options.access ?? access),
+      files: options.complianceFiles ?? await detectDependencyFiles(options.cwd ?? process.cwd(), {
+        lstat: options.lstat ?? lstat,
+        realpath: options.realpath ?? realpath,
+      }),
     }, options.compliance);
     capabilities.compliance = evaluated.result;
     await options.writeComplianceArtifact(evaluated.artifactBytes);
@@ -43,11 +46,16 @@ export async function executeContract(contract, options = {}) {
   return buildResult(contract, commands, outcome, options, capabilities);
 }
 
-async function detectDependencyFiles(cwd, accessFile) {
+async function detectDependencyFiles(cwd, files) {
+  const root = await files.realpath(cwd);
   const names = ['npm-shrinkwrap.json', 'package-lock.json', 'pnpm-lock.yaml'];
   const present = [];
   for (const name of names) {
-    try { await accessFile(join(cwd, name)); present.push(name); }
+    try {
+      const metadata = await files.lstat(join(root, name));
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new ComplianceBoundaryError(`dependency evidence must be a regular file: ${name}`);
+      present.push(name);
+    }
     catch (error) { if (error?.code !== 'ENOENT') throw error; }
   }
   return present;

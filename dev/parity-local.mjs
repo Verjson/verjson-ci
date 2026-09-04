@@ -31,7 +31,7 @@ for (const scenario of scenarios) {
     `scenario=${scenario}`,
     '--env',
     `VERJSON_CI_LOCAL_IMAGE=${image}`,
-    ], scenario.endsWith('failure') ? 1 : 0);
+    ], ['success', 'compliance-success'].includes(scenario) ? 0 : 1);
 }
 run(resolve(root, 'dev/gitlab/run-local'), [scenarios.join(','), image]);
 for (const scenario of scenarios) await compareScenario(scenario);
@@ -54,8 +54,9 @@ function parseArgs(args) {
 }
 
 function selectScenarios({ changed, scenario }) {
-  if (scenario === 'all') return ['success', 'failure', 'compliance-success', 'compliance-required-failure'];
-  const supported = new Set(['success', 'failure', 'compliance-success', 'compliance-required-failure']);
+  const all = ['success', 'failure', 'compliance-success', 'compliance-required-failure', 'compliance-missing-evidence', 'compliance-malformed-pack', 'compliance-missing-pack'];
+  if (scenario === 'all') return all;
+  const supported = new Set(all);
   if (scenario) {
     if (!supported.has(scenario)) {
       throw new Error(`unknown local parity scenario: ${scenario}`);
@@ -71,8 +72,8 @@ function selectScenarios({ changed, scenario }) {
     if (diff.status !== 0) {
       throw new Error('could not determine changed files for local parity');
     }
-    if (/verjson-ci\.schema\.json|packages\/schema\//.test(diff.stdout)) {
-      return ['success', 'failure', 'compliance-success', 'compliance-required-failure'];
+    if (/verjson-ci\.schema\.json|release\/manifest|packages\/(?:schema|compliance)\//.test(diff.stdout)) {
+      return all;
     }
   }
   return ['success'];
@@ -107,6 +108,13 @@ function runExpected(command, args, expectedStatus) {
 
 async function compareScenario(scenario) {
   const directory = resolve(root, '.verjson-ci/local');
+  const githubExit = await readFile(resolve(directory, `${scenario}-github-exit-code`), 'utf8');
+  const gitlabExit = await readFile(resolve(directory, `${scenario}-gitlab-exit-code`), 'utf8');
+  if (githubExit !== gitlabExit) throw new Error(`adapter exit mismatch for scenario ${scenario}`);
+  if (['compliance-malformed-pack', 'compliance-missing-pack'].includes(scenario)) {
+    if (githubExit.trim() !== '2' || existsSync(resolve(directory, `${scenario}-github.json`)) || existsSync(resolve(directory, `${scenario}-gitlab.json`))) throw new Error(`compliance boundary did not fail closed for scenario ${scenario}`);
+    return;
+  }
   const github = JSON.parse(await readFile(resolve(directory, `${scenario}-github.json`), 'utf8'));
   const gitlab = JSON.parse(await readFile(resolve(directory, `${scenario}-gitlab.json`), 'utf8'));
   // GitLab runs a snapshot commit so uncommitted developer changes are testable.

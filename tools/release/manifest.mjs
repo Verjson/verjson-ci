@@ -4,7 +4,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { FRAMEWORK_PACKS } from '../../packages/compliance/src/index.mjs';
-import schema from '../../release/manifest.schema.json' with { type: 'json' };
+import schemaV1 from '../../release/manifest-v1.schema.json' with { type: 'json' };
+import schemaV2 from '../../release/manifest.schema.json' with { type: 'json' };
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const SHA = /^[0-9a-f]{40}$/;
@@ -12,7 +13,8 @@ const HEX = /^[0-9a-f]{64}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const STATES = new Set(['staged', 'complete', 'quarantined']);
 export const REQUIRED_ENDPOINT_IDS = Object.freeze(['release-tag', 'cli', 'oci', 'github-action', 'gitlab-mirror', 'gitlab-component', 'github-consumption', 'gitlab-consumption']);
-const schemaValidator = new Ajv2020({ strict: true, strictRequired: false, formats: { uri: /^https:\/\/[^\s]+$/ } }).compile(schema);
+const ajv = new Ajv2020({ strict: true, strictRequired: false, formats: { uri: /^https:\/\/[^\s]+$/ } });
+const schemaValidators = new Map([[1, ajv.compile(schemaV1)], [2, ajv.compile(schemaV2)]]);
 
 export function canonicalBytes(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalBytes).join(',')}]`;
@@ -28,7 +30,7 @@ export const objectDigest = manifestDigest;
 export function buildManifest(input) {
   const receipts = Object.fromEntries(['github', 'gitlab'].map((forge) => [forge, validateReceipt(input.receipts?.[forge], forge, input)]));
   const manifest = {
-    schemaVersion: 1, version: input.version, commit: input.commit, state: input.state ?? 'staged',
+    schemaVersion: 2, version: input.version, commit: input.commit, state: input.state ?? 'staged',
     artifacts: {
       cli: input.cli, oci: { reference: input.imageReference, digest: input.imageDigest },
       github: { path: 'adapters/github/action', ref: input.version }, gitlab: { path: 'templates/ci.yml', ref: input.version },
@@ -41,18 +43,21 @@ export function buildManifest(input) {
 }
 
 export function validateManifest(manifest) {
-  if (!schemaValidator(manifest)) throw new Error(`release manifest schema invalid: ${schemaValidator.errors[0].instancePath || '/'} ${schemaValidator.errors[0].message}`);
+  const schemaValidator = schemaValidators.get(manifest?.schemaVersion);
+  if (!schemaValidator || !schemaValidator(manifest)) throw new Error(`release manifest schema invalid: ${schemaValidator?.errors?.[0]?.instancePath || '/'} ${schemaValidator?.errors?.[0]?.message ?? 'unsupported schemaVersion'}`);
   exact(manifest, ['schemaVersion', 'version', 'commit', 'state', 'artifacts', 'receipts', 'endpoints', ...(manifest?.state === 'quarantined' ? ['quarantineReason'] : [])], 'manifest');
-  if (manifest.schemaVersion !== 1 || !SEMVER.test(manifest.version) || !SHA.test(manifest.commit) || !STATES.has(manifest.state)) throw new Error('invalid release manifest identity');
+  if (![1, 2].includes(manifest.schemaVersion) || !SEMVER.test(manifest.version) || !SHA.test(manifest.commit) || !STATES.has(manifest.state)) throw new Error('invalid release manifest identity');
   if (manifest.state === 'quarantined' ? !manifest.quarantineReason : 'quarantineReason' in manifest) throw new Error('invalid quarantine state');
-  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror', 'compliance'], 'artifacts');
+  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror', ...(manifest.schemaVersion === 2 ? ['compliance'] : [])], 'artifacts');
   const { cli, oci } = manifest.artifacts;
   exact(cli, ['version', 'path', 'sha256'], 'CLI artifact');
   if (cli.version !== manifest.version || !cli.path || !HEX.test(cli.sha256)) throw new Error('CLI version or integrity differs from release');
   exact(oci, ['reference', 'digest'], 'OCI artifact');
   if (!oci.reference || !DIGEST.test(oci.digest)) throw new Error('invalid OCI artifact');
-  exact(manifest.artifacts.compliance, ['path', 'packs'], 'compliance artifact');
-  if (manifest.artifacts.compliance.path !== 'packages/compliance/packs' || canonicalBytes(manifest.artifacts.compliance.packs) !== canonicalBytes(FRAMEWORK_PACKS)) throw new Error('compliance pack catalog differs from release');
+  if (manifest.schemaVersion === 2) {
+    exact(manifest.artifacts.compliance, ['path', 'packs'], 'compliance artifact');
+    if (manifest.artifacts.compliance.path !== 'packages/compliance/packs' || canonicalBytes(manifest.artifacts.compliance.packs) !== canonicalBytes(FRAMEWORK_PACKS)) throw new Error('compliance pack catalog differs from release');
+  }
   exact(manifest.receipts, ['github', 'gitlab'], 'receipts');
   exact(manifest.endpoints, REQUIRED_ENDPOINT_IDS, 'endpoints');
   for (const id of REQUIRED_ENDPOINT_IDS) if (!DIGEST.test(manifest.endpoints[id])) throw new Error(`endpoint ${id} digest invalid`);

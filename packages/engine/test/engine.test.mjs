@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { executeContract } from '../src/index.mjs';
@@ -74,4 +77,36 @@ test('refuses to report compliant controls when no evidence artifact can be writ
     commands: { test: 'true' },
     checks: { compliance: { frameworks: [{ id: 'verjson-ci-foundation', version: '1.0.0' }], mode: 'report' } },
   }, { stdio: 'ignore' }), /artifact writer is required/);
+});
+
+test('rejects directories and symlinks masquerading as dependency lockfiles', async () => {
+  const contract = {
+    schema: 1,
+    commands: { test: 'true' },
+    checks: { compliance: { frameworks: [{ id: 'verjson-ci-foundation', version: '1.0.0' }], mode: 'required' } },
+  };
+  for (const kind of ['directory', 'symlink']) {
+    const cwd = await mkdtemp(join(tmpdir(), 'verjson-ci-lockfile-boundary-'));
+    try {
+      if (kind === 'directory') await mkdir(join(cwd, 'pnpm-lock.yaml'));
+      else {
+        await writeFile(join(cwd, 'actual-lock.yaml'), "lockfileVersion: '9.0'\n");
+        await symlink('actual-lock.yaml', join(cwd, 'pnpm-lock.yaml'));
+      }
+      await assert.rejects(() => executeContract(contract, { cwd, stdio: 'ignore', writeComplianceArtifact: async () => {} }), /must be a regular file/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rejects special filesystem entries as dependency evidence', async () => {
+  const contract = { schema: 1, commands: { test: 'true' }, checks: { compliance: 'auto' } };
+  await assert.rejects(() => executeContract(contract, {
+    cwd: process.cwd(),
+    stdio: 'ignore',
+    realpath: async (path) => path,
+    lstat: async () => ({ isFile: () => false, isSymbolicLink: () => false }),
+    writeComplianceArtifact: async () => {},
+  }), /must be a regular file/);
 });
