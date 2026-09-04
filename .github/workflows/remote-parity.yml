@@ -3,10 +3,10 @@ name: remote cross-forge parity
 on:
   workflow_dispatch:
     inputs:
-      coordinator-url:
+      image:
         required: true
         type: string
-      image:
+      adapter-version:
         required: true
         type: string
       scenario:
@@ -19,23 +19,38 @@ permissions:
   id-token: write
 
 jobs:
-  dispatch-gitlab:
+  cross-forge-parity:
+    environment: cross-forge-conformance
+    timeout-minutes: 15
     runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || github.event.repository.private == true && fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
     steps:
       - name: Exchange GitHub OIDC identity for GitLab dispatch
         env:
-          COORDINATOR_URL: ${{ inputs['coordinator-url'] }}
+          COORDINATOR_ORIGIN: ${{ vars.VERJSON_CI_COORDINATOR_ORIGIN }}
           IMAGE: ${{ inputs.image }}
           SCENARIO: ${{ inputs.scenario }}
+          ADAPTER_VERSION: ${{ inputs['adapter-version'] }}
         run: |
           set -euo pipefail
-          token="$(curl --fail --silent --show-error \
+          coordinator_origin="$(node -e 'const url=new URL(process.env.COORDINATOR_ORIGIN);if(url.protocol!=="https:"||url.username||url.password||url.pathname!=="/"||url.search||url.hash)throw new Error("VERJSON_CI_COORDINATOR_ORIGIN must be one exact credential-free HTTPS origin");process.stdout.write(url.origin)')"
+          token="$(curl --fail --silent --show-error --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=verjson-ci-conformance" | jq -r .value)"
           capability="$(jq -n --arg token "$token" '{token:$token}' | curl --fail --silent --show-error \
+            --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header 'content-type: application/json' --data-binary @- \
-            "$COORDINATOR_URL/v1/authorize/github" | jq -r .capability)"
-          jq -n --arg image "$IMAGE" --arg scenario "$SCENARIO" --arg commit "$GITHUB_SHA" \
-            '{image:$image,scenario:$scenario,commit:$commit}' | curl --fail --silent --show-error \
+            "$coordinator_origin/v1/authorize/github" | jq -r .capability)"
+          request_id="$(jq -n --arg image "$IMAGE" --arg scenario "$SCENARIO" --arg commit "$GITHUB_SHA" --arg adapterVersion "$ADAPTER_VERSION" \
+            '{image:$image,scenario:$scenario,commit:$commit,adapterVersion:$adapterVersion}' | curl --fail --silent --show-error \
+            --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header 'content-type: application/json' --header "Authorization: Bearer $capability" \
-            --data-binary @- "$COORDINATOR_URL/v1/dispatch"
+            --data-binary @- "$coordinator_origin/v1/dispatch" | jq -r .requestId)"
+          for attempt in $(seq 1 60); do
+            verdict="$(curl --fail --silent --show-error --location --max-redirs 0 --connect-timeout 5 --max-time 15 "$coordinator_origin/v1/verdict/$request_id")"
+            status="$(jq -r .status <<<"$verdict")"
+            if [ "$status" = passed ]; then exit 0; fi
+            if [ "$status" = failed ]; then jq . <<<"$verdict"; exit 1; fi
+            sleep 10
+          done
+          echo 'cross-forge evidence unavailable before deadline' >&2
+          exit 1

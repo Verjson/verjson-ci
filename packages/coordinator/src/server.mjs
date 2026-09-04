@@ -2,8 +2,10 @@ import { createServer } from 'node:http';
 
 import { AuthorizationError, ConformanceError } from './index.mjs';
 
+class PayloadTooLargeError extends Error {}
+
 export function createCoordinatorServer({ coordinator, aggregator }) {
-  return createServer(async (request, response) => {
+  return createServer({ headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 5_000, maxHeaderSize: 16_384 }, async (request, response) => {
     try {
       const body = request.method === 'POST' ? await readJson(request) : null;
       const authorize = request.url?.match(/^\/v1\/authorize\/(github|gitlab)$/);
@@ -21,6 +23,7 @@ export function createCoordinatorServer({ coordinator, aggregator }) {
       if (request.method === 'GET' && verdict) return send(response, 200, await aggregator.verdict(verdict[1]));
       send(response, 404, { error: 'not found' });
     } catch (error) {
+      if (error instanceof PayloadTooLargeError) return send(response, 413, { error: error.message });
       if (error instanceof AuthorizationError) return send(response, 401, { error: error.message });
       if (error instanceof ConformanceError || error instanceof SyntaxError) return send(response, 400, { error: error.message });
       send(response, 500, { error: 'coordinator failure' });
@@ -29,12 +32,17 @@ export function createCoordinatorServer({ coordinator, aggregator }) {
 }
 
 async function readJson(request) {
-  let body = '';
+  const chunks = [];
+  let received = 0;
   for await (const chunk of request) {
-    body += chunk;
-    if (body.length > 65_536) throw new ConformanceError('request body too large');
+    received += chunk.length;
+    if (received > 65_536) {
+      request.resume();
+      throw new PayloadTooLargeError('request body too large');
+    }
+    chunks.push(chunk);
   }
-  return JSON.parse(body || '{}');
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
 function bearer(header = '') {

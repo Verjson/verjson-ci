@@ -20,13 +20,13 @@ async function withServer(callback) {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
-    await callback(`http://127.0.0.1:${server.address().port}`);
+    await callback(`http://127.0.0.1:${server.address().port}`, server);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 }
 
-test('exchanges a verified job token for one opaque dispatch call', async () => {
+test('exchanges a verified job token for one opaque bounded dispatch call', async () => {
   await withServer(async (url) => {
     const authorization = await fetch(`${url}/v1/authorize/github`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'valid' }),
@@ -42,14 +42,18 @@ test('exchanges a verified job token for one opaque dispatch call', async () => 
 });
 
 test('returns bounded errors without leaking verifier details', async () => {
-  await withServer(async (url) => {
+  await withServer(async (url, server) => {
+    assert.equal(server.headersTimeout, 10_000);
+    assert.equal(server.requestTimeout, 15_000);
+    assert.equal(server.keepAliveTimeout, 5_000);
     const invalid = await fetch(`${url}/v1/authorize/github`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'invalid' }),
     });
     assert.equal(invalid.status, 401);
     assert.deepEqual(await invalid.json(), { error: 'OIDC verification failed' });
 
-    const oversized = await fetch(`${url}/v1/receipts`, { method: 'POST', body: 'x'.repeat(65_537) });
-    assert.equal(oversized.status, 400);
+    const oversized = await fetch(`${url}/v1/receipts`, { method: 'POST', body: 'é'.repeat(32_769) });
+    assert.equal(oversized.status, 413);
+    assert.deepEqual(await oversized.json(), { error: 'request body too large' });
   });
 });

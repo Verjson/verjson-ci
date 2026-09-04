@@ -53,3 +53,19 @@ test('both adapters require an externally pinned image identity', async () => {
   assert.doesNotMatch(github, /:latest|:main|:edge/);
   assert.doesNotMatch(gitlab, /:latest|:main|:edge/);
 });
+
+test('remote parity adapters use a protected fixed origin and await both receipts', async () => {
+  const github = await readFile('.github/workflows/remote-parity.yml', 'utf8');
+  const gitlab = await readFile('templates/remote-parity.yml', 'utf8');
+
+  for (const adapter of [github, gitlab]) {
+    assert.doesNotMatch(adapter, /coordinator-url:/);
+    assert.match(adapter, /VERJSON_CI_COORDINATOR_ORIGIN/);
+    assert.match(adapter, /requestId/);
+    assert.match(adapter, /status/);
+    assert.match(adapter, /evidence unavailable/);
+  }
+  assert.match(github, /environment: cross-forge-conformance/);
+  assert.match(github, /--max-redirs 0/);
+  assert.match(gitlab, /redirect:\s*"error"/);
+});
