@@ -60,12 +60,22 @@ test('remote parity adapters use a protected fixed origin and await both receipt
 
   for (const adapter of [github, gitlab]) {
     assert.doesNotMatch(adapter, /coordinator-url:/);
-    assert.match(adapter, /VERJSON_CI_COORDINATOR_ORIGIN/);
     assert.match(adapter, /requestId/);
     assert.match(adapter, /status/);
     assert.match(adapter, /evidence unavailable/);
   }
   assert.match(github, /environment: cross-forge-conformance/);
+  assert.match(github, /VERJSON_CI_COORDINATOR_ORIGIN/);
   assert.match(github, /--max-redirs 0/);
+  assert.match(gitlab, /const base="https:\/\/coordinator\.verjson\.org"/);
+  assert.doesNotMatch(gitlab, /process\.env\.(?:VERJSON_CI_)?COORDINATOR/);
   assert.match(gitlab, /redirect:\s*"error"/);
+});
+
+test('GitLab pipeline variables cannot override the compiled token destination', async () => {
+  const gitlab = await readFile('templates/remote-parity.yml', 'utf8');
+  const attackerVariable = 'VERJSON_CI_COORDINATOR_ORIGIN=https://attacker.example';
+  assert.equal(gitlab.includes(attackerVariable.split('=')[1]), false);
+  assert.match(gitlab, /const base="https:\/\/coordinator\.verjson\.org"/);
+  assert.doesNotMatch(gitlab, /\$\[\[ inputs\.(?:coordinator|origin)|process\.env\.(?:VERJSON_CI_)?COORDINATOR/);
 });

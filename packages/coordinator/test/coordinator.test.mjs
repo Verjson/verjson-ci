@@ -23,16 +23,28 @@ const trustedJwks = Object.fromEntries(Object.values(policies).map((policy) => [
 
 function memoryReceiptStore() {
   const records = new Map();
+  let completions = 0;
   return {
-    register: async (id, value) => !records.has(id) && Boolean(records.set(id, { ...value, receipts: {} })),
+    register: async (id, value) => !records.has(id) && Boolean(records.set(id, { ...structuredClone(value), receipts: {} })),
     get: async (id) => records.get(id),
+    claimDispatch: async (id, forge) => {
+      const intent = records.get(id)?.dispatches[forge];
+      if (!intent || intent.state === 'dispatching' || intent.state === 'dispatched') return false;
+      intent.state = 'dispatching'; intent.attempts += 1; return true;
+    },
+    finishDispatch: async (id, forge, state) => { records.get(id).dispatches[forge].state = state; },
     putIfAbsent: async (id, forge, receipt) => {
       const record = records.get(id);
       if (!record || record.receipts[forge]) return false;
       record.receipts[forge] = receipt;
       return true;
     },
-    complete: async (id, result) => { const record = records.get(id); record.completed = result; },
+    completeIfAbsent: async (id, result) => {
+      const record = records.get(id);
+      if (record.completed) return false;
+      record.completed = result; completions += 1; return true;
+    },
+    completionCount: () => completions,
   };
 }
 
@@ -48,7 +60,7 @@ function coordinatorHarness(overrides = {}) {
     verifier: { verify: async (_token, policy) => ({ jti: `identity-${policy.forge}`, iat: now / 1000, exp: now / 1000 + 300, sha: 'b'.repeat(40), ...policy.claims }) },
     replayStore: { reserve: async (key) => !replay.has(key) && Boolean(replay.add(key)) },
     capabilityStore: { put: async (key, value) => capabilities.set(key, value), consume: async (key) => { const value = capabilities.get(key); capabilities.delete(key); return value; } },
-    dispatcher: { dispatch: async (forge, request) => dispatched.push({ forge, request }) },
+    dispatcher: { dispatch: async (forge, request, options) => dispatched.push({ forge, request, options }) },
     aggregator, clock: () => now, ...overrides,
   });
   return { aggregator, coordinator, dispatched };
@@ -105,6 +117,7 @@ test('binds one capability to a closed immutable request and dispatches both for
   const result = await coordinator.dispatch(grant.capability, input);
   assert.equal(result.status, 'pending'); assert.deepEqual(dispatched.map(({ forge }) => forge), ['github', 'gitlab']);
   assert.equal(dispatched[0].request.requestDigest, dispatched[1].request.requestDigest);
+  assert.deepEqual(dispatched.map(({ options }) => options.idempotencyKey), [`${result.requestId}:github`, `${result.requestId}:gitlab`]);
   await assert.rejects(() => coordinator.dispatch(grant.capability, input), AuthorizationError);
   for (const bad of [
     { ...input, extra: true }, { ...input, image: 'ghcr.io/verjson/ci:latest' },
@@ -114,6 +127,32 @@ test('binds one capability to a closed immutable request and dispatches both for
     const fresh = coordinatorHarness().coordinator; const next = await fresh.authorize('token', 'github');
     await assert.rejects(() => fresh.dispatch(next.capability, bad), ConformanceError);
   }
+});
+
+test('persists both dispatch intents before calls and retries only the failed leg idempotently', async () => {
+  const calls = []; let failGitLab = true; let registeredBeforeDispatch = false;
+  const receiptStore = memoryReceiptStore();
+  const aggregator = new ReceiptAggregator({ verifier: { verify: async (value) => value }, receiptStore, signers: { github: 'g', gitlab: 'l' }, clock: () => now });
+  const dispatcher = { dispatch: async (forge, request, options) => {
+    const record = await receiptStore.get(request.requestId);
+    registeredBeforeDispatch = registeredBeforeDispatch || Boolean(record?.dispatches.github && record?.dispatches.gitlab);
+    calls.push({ forge, key: options.idempotencyKey });
+    if (forge === 'gitlab' && failGitLab) throw new Error('temporary outage');
+  } };
+  const { coordinator } = coordinatorHarness({ aggregator, dispatcher });
+  const grant = await coordinator.authorize('token', 'github');
+  const input = { image: `ghcr.io/verjson/ci@${digest('a')}`, commit: 'b'.repeat(40), scenario: 'success', adapterVersion: '1.2.3' };
+  const first = await coordinator.dispatch(grant.capability, input);
+  assert.equal(registeredBeforeDispatch, true);
+  assert.deepEqual(first, { requestId: first.requestId, status: 'pending', reason: 'dispatch-incomplete', dispatches: { github: 'dispatched', gitlab: 'failed' } });
+  failGitLab = false;
+  assert.deepEqual(await coordinator.retryDispatch(first.requestId), { status: 'pending', dispatches: { github: 'dispatched', gitlab: 'dispatched' } });
+  await coordinator.retryDispatch(first.requestId);
+  assert.deepEqual(calls, [
+    { forge: 'github', key: `${first.requestId}:github` },
+    { forge: 'gitlab', key: `${first.requestId}:gitlab` },
+    { forge: 'gitlab', key: `${first.requestId}:gitlab` },
+  ]);
 });
 
 test('accepts two independently signed bound receipts and rejects signer confusion and replay', async () => {
@@ -162,4 +201,22 @@ test('fails closed for missing, expired, and mismatched evidence', async () => {
   } });
   await aggregator.accept(receipt('g', 'github', digest('a')));
   assert.deepEqual(await aggregator.accept(receipt('l', 'gitlab', digest('b'))), { status: 'failed', reason: 'result-digest-mismatch' });
+});
+
+test('completes exactly once when final receipts arrive concurrently', async () => {
+  const receiptStore = memoryReceiptStore();
+  const aggregator = new ReceiptAggregator({ verifier: { verify: async (value) => value }, receiptStore, signers: { github: 'g', gitlab: 'l' }, clock: () => now });
+  const request = { requestId: 'race', nonce: 'nonce', requestDigest: digest('d'), candidateDigest: `ghcr.io/verjson/ci@${digest('a')}`, commit: 'b'.repeat(40), scenario: 'success', adapterVersion: '1.2.3' };
+  await aggregator.register(request, now + 60_000);
+  const signed = (signer, forge) => ({ signer, payload: {
+    requestId: request.requestId, nonce: request.nonce, requestDigest: request.requestDigest,
+    candidateDigest: request.candidateDigest, commit: request.commit, scenario: request.scenario,
+    adapter: forge === 'github' ? 'github-action' : 'gitlab-component', adapterVersion: request.adapterVersion,
+    resultDigest: digest('c'), iat: now / 1000, exp: now / 1000 + 60,
+  } });
+  const verdicts = await Promise.all([aggregator.accept(signed('g', 'github')), aggregator.accept(signed('l', 'gitlab'))]);
+  assert.ok(verdicts.some(({ status }) => status === 'passed'));
+  assert.equal(receiptStore.completionCount(), 1);
+  assert.deepEqual(await aggregator.verdict(request.requestId), { status: 'passed', resultDigest: digest('c') });
+  assert.equal(receiptStore.completionCount(), 1);
 });

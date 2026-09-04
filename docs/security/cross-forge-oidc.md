@@ -6,13 +6,14 @@ The coordinator verifies the issuer signature and exact audience, then requires 
 
 The consumed capability accepts only an immutable OCI digest under the policy's repository, the commit SHA carried by the authenticated workload identity, an allowed scenario, and the unified adapter SemVer. One request atomically registers a nonce and digest over those values, then dispatches both forge legs against the policy-selected fixture project. Each leg signs the bound request, adapter identity, canonical result digest, and bounded lifetime with an independent key. Authenticated signer identity selects the forge. Receipts are create-once and reject replay, overwrite, cross-request substitution, and post-completion evidence. Missing or expired evidence is never success, and differing canonical result digests fail conformance.
 
-The GitHub workflow reads `VERJSON_CI_COORDINATOR_ORIGIN` only from the protected `cross-forge-conformance` environment. The GitLab component reads it only from a protected CI/CD variable. Neither surface accepts the origin as an input. Both require one credential-free HTTPS origin before obtaining a token, reject redirects, enforce network deadlines, initiate both fixture legs, and poll to a fail-closed deadline.
+The GitHub workflow reads `VERJSON_CI_COORDINATOR_ORIGIN` only from the protected `cross-forge-conformance` environment. The canonical GitLab component compiles `https://coordinator.verjson.org` directly into its token-bearing job; adopter mirrors must compile their own exact origin under protected review before signing an immutable component tag. Pipeline, execution-policy, and component input variables cannot select or override that destination. Both adapters reject redirects, enforce network deadlines, initiate both fixture legs, and poll to a fail-closed deadline.
 
 ## Required deployment controls
 
 - Pin issuer, HTTPS JWKS allowlist, audience, every required identity claim, fixture project, OCI repository, scenarios, and receipt lifetime as code.
 - Store replay and capability records in an atomic, expiring data store shared by all coordinator replicas.
-- Store request registration, create-once forge receipt slots, and completion state transactionally across replicas.
+- Store request registration and both per-leg outbox intents in one transaction before external dispatch. Claims, retries, create-once receipt slots, and completion compare-and-set operations must be atomic across replicas; dispatchers consume the stable `requestId:forge` idempotency key.
+- Run an internal outbox worker that calls `retryDispatch(requestId)` for pending or failed legs until delivery succeeds or the request expires. Partial dispatch state remains visible to verdict clients and can never be interpreted as conformance success.
 - Keep forge credentials in the deployment secret manager and out of job responses, logs, and artifacts.
 - Restrict callback signers independently for GitHub and GitLab and rotate them without weakening receipt verification.
 - Audit authorization, dispatch, callback, expiry, replay, and mismatch events without recording bearer tokens.

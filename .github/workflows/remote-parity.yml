@@ -45,7 +45,7 @@ jobs:
             --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header 'content-type: application/json' --header "Authorization: Bearer $capability" \
             --data-binary @- "$coordinator_origin/v1/dispatch" | jq -r .requestId)"
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             verdict="$(curl --fail --silent --show-error --location --max-redirs 0 --connect-timeout 5 --max-time 15 "$coordinator_origin/v1/verdict/$request_id")"
             status="$(jq -r .status <<<"$verdict")"
             if [ "$status" = passed ]; then exit 0; fi

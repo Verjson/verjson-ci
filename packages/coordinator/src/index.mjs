@@ -58,8 +58,23 @@ export class OidcCoordinator {
     };
     constraints.requestDigest = digestRequest(constraints);
     await this.aggregator.register(constraints, this.clock() + grant.dispatch.receiptTtlMs);
-    await Promise.all(['github', 'gitlab'].map((forge) => this.dispatcher.dispatch(forge, constraints)));
-    return { requestId: constraints.requestId, status: 'pending' };
+    await this.retryDispatch(constraints.requestId);
+    return { requestId: constraints.requestId, ...await this.aggregator.verdict(constraints.requestId) };
+  }
+  async retryDispatch(requestId) {
+    const record = await this.aggregator.request(requestId);
+    if (!record) throw new ConformanceError('unknown conformance request');
+    if (record.completed || record.expiresAt <= this.clock()) return this.aggregator.verdict(requestId);
+    await Promise.all(['github', 'gitlab'].map(async (forge) => {
+      if (!await this.aggregator.claimDispatch(requestId, forge)) return;
+      try {
+        await this.dispatcher.dispatch(forge, record.request, { idempotencyKey: `${requestId}:${forge}` });
+        await this.aggregator.finishDispatch(requestId, forge, 'dispatched');
+      } catch {
+        await this.aggregator.finishDispatch(requestId, forge, 'failed');
+      }
+    }));
+    return this.aggregator.verdict(requestId);
   }
 }
 
@@ -70,8 +85,12 @@ export class ReceiptAggregator {
     if (this.signers.size !== 2 || !Object.keys(ADAPTERS).every((forge) => [...this.signers.values()].includes(forge))) throw new TypeError('one independent signer is required for each forge');
   }
   async register(request, expiresAt) {
-    if (!await this.receiptStore.register(request.requestId, { request, expiresAt })) throw new ConformanceError('conformance request already registered');
+    const dispatches = { github: { state: 'pending', attempts: 0 }, gitlab: { state: 'pending', attempts: 0 } };
+    if (!await this.receiptStore.register(request.requestId, { request, expiresAt, dispatches })) throw new ConformanceError('conformance request already registered');
   }
+  request(requestId) { return this.receiptStore.get(requestId); }
+  claimDispatch(requestId, forge) { return this.receiptStore.claimDispatch(requestId, forge); }
+  finishDispatch(requestId, forge, state) { return this.receiptStore.finishDispatch(requestId, forge, state); }
   async accept(signedReceipt) {
     const verified = await this.verifier.verify(signedReceipt);
     const forge = this.signers.get(verified.signer);
@@ -87,11 +106,17 @@ export class ReceiptAggregator {
   async verdict(requestId) {
     const record = await this.receiptStore.get(requestId);
     if (!record || record.expiresAt <= this.clock()) return { status: 'failed', reason: 'evidence-unavailable' };
+    if (record.completed) return record.completed;
     const { github, gitlab } = record.receipts || {};
-    if (!github || !gitlab) return { status: 'pending' };
+    if (!github || !gitlab) {
+      const dispatches = Object.fromEntries(Object.entries(record.dispatches).map(([forge, value]) => [forge, value.state]));
+      return Object.values(dispatches).includes('failed')
+        ? { status: 'pending', reason: 'dispatch-incomplete', dispatches }
+        : { status: 'pending', dispatches };
+    }
     const result = github.resultDigest === gitlab.resultDigest ? { status: 'passed', resultDigest: github.resultDigest } : { status: 'failed', reason: 'result-digest-mismatch' };
-    await this.receiptStore.complete(requestId, result);
-    return result;
+    await this.receiptStore.completeIfAbsent(requestId, result);
+    return (await this.receiptStore.get(requestId)).completed;
   }
 }
 
