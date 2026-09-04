@@ -165,3 +165,22 @@ test('retains stable signed state across hard process exits at both ledger bound
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
 });
+
+test('successor process reconciles a hard kill after endpoint creation without overwrite', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'release-endpoint-process-'));
+  try {
+    const workerPath = 'packages/release/test/fixtures/release-worker.mjs';
+    const crashed = spawnSync(process.execPath, [workerPath, directory, 'crash']); assert.equal(crashed.status, 92);
+    const endpoint = path.join(directory, 'endpoints', 'cli'); const before = await readFile(endpoint, 'utf8');
+    const resumed = spawnSync(process.execPath, [workerPath, directory, 'resume'], { encoding: 'utf8' }); assert.equal(resumed.status, 0, resumed.stderr);
+    assert.equal(await readFile(endpoint, 'utf8'), before); assert.equal(JSON.parse(await readFile(path.join(directory, 'complete.json'))).state, 'complete');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('successor process fails closed when the externally created endpoint mismatches', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'release-endpoint-mismatch-'));
+  try {
+    const worker = spawnSync(process.execPath, ['packages/release/test/fixtures/release-worker.mjs', directory, 'mismatch'], { encoding: 'utf8' });
+    assert.notEqual(worker.status, 0); assert.match(worker.stderr, /release quarantined/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

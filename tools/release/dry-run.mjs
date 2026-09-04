@@ -16,6 +16,7 @@ const work = await mkdtemp(path.join(tmpdir(), 'verjson-ci-release-'));
 const sourceRoot = path.join(work, 'sources');
 const endpointRoot = path.join(work, 'endpoints');
 await mkdir(sourceRoot); await mkdir(endpointRoot);
+let registryContainer;
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const signerIdentity = `ed25519:${createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex')}`;
@@ -35,16 +36,29 @@ async function prepareArtifacts() {
   await execFileAsync('npm', ['install', '--prefix', cliConsumer, cli.path]);
   await execFileAsync(path.join(cliConsumer, 'node_modules/.bin/verjson-ci'), ['run', '--config', path.resolve('test/fixtures/success/verjson-ci.yml'), '--output', path.join(cliConsumer, 'result.json')], { env: { ...process.env, VERJSON_CI_PROVIDER: 'github', VERJSON_CI_SCENARIO: 'success', VERJSON_CI_COMMIT: commit } });
   await execFileAsync('docker', ['build', '--file', 'container/Dockerfile', '--tag', `verjson-ci-disposable:${version}`, '.']);
-  const { stdout: imageDigest } = await execFileAsync('docker', ['image', 'inspect', '--format={{.Id}}', `verjson-ci-disposable:${version}`]);
+  registryContainer = `verjson-ci-release-registry-${process.pid}`;
+  await execFileAsync('docker', ['run', '--detach', '--rm', '--name', registryContainer, '--publish', '127.0.0.1::5000', 'registry:2']);
+  const { stdout: port } = await execFileAsync('docker', ['port', registryContainer, '5000/tcp']);
+  const imageRepository = `localhost:${port.trim().split(':').at(-1)}/verjson-ci`;
+  await execFileAsync('docker', ['tag', `verjson-ci-disposable:${version}`, `${imageRepository}:${version}`]);
+  await execFileAsync('docker', ['push', `${imageRepository}:${version}`]);
+  const { stdout: repoDigest } = await execFileAsync('docker', ['image', 'inspect', '--format={{index .RepoDigests 0}}', `${imageRepository}:${version}`]);
+  const image = repoDigest.trim(); const imageDigest = image.slice(image.lastIndexOf('@') + 1);
   const ociTar = path.join(sourceRoot, 'oci.tar');
-  await execFileAsync('docker', ['save', '--output', ociTar, `verjson-ci-disposable:${version}`]);
+  await execFileAsync('docker', ['save', '--output', ociTar, `${imageRepository}:${version}`]);
   const tagRepository = path.join(work, 'github.git'); const mirrorRepository = path.join(work, 'gitlab.git');
   await execFileAsync('git', ['clone', '--bare', '.', tagRepository]); await execFileAsync('git', ['init', '--bare', mirrorRepository]);
+  await execFileAsync('git', ['--git-dir', tagRepository, 'tag', version, commit]);
+  await execFileAsync('git', ['--git-dir', tagRepository, 'push', mirrorRepository, `refs/tags/${version}:refs/tags/${version}`]);
+  const githubConsumer = path.join(work, 'github-consumer'); const gitlabConsumer = path.join(work, 'gitlab-consumer');
+  await execFileAsync('git', ['clone', '--branch', version, tagRepository, githubConsumer]);
+  await execFileAsync('git', ['clone', '--branch', version, mirrorRepository, gitlabConsumer]);
   const requestId = `dry-run-${version}-${commit}`;
   const forgeKeyRoot = path.join(work, 'forge-keys'); const receipts = {};
   for (const forge of ['github', 'gitlab']) {
     const receiptPath = path.join(work, `${forge}-receipt.json`);
-    await execFileAsync(process.execPath, ['tools/release/disposable-forge-fixture.mjs', forge, `verjson-ci-disposable:${version}`, imageDigest.trim(), commit, requestId, receiptPath, forgeKeyRoot]);
+    const fixtureRoot = forge === 'github' ? githubConsumer : gitlabConsumer;
+    await execFileAsync(process.execPath, [path.resolve('tools/release/disposable-forge-fixture.mjs'), forge, image, imageDigest, commit, requestId, receiptPath, forgeKeyRoot, fixtureRoot], { env: process.env });
     receipts[forge] = JSON.parse(await readFile(receiptPath, 'utf8'));
   }
   const sources = {
@@ -53,11 +67,11 @@ async function prepareArtifacts() {
     'gitlab-component': await materialize('gitlab-component', await treeBytes('templates')),
     'gitlab-mirror': await materialize('gitlab-mirror', Buffer.from(`${commit}\n`)),
     'release-tag': await materialize('release-tag', Buffer.from(`${commit}\n`)),
-    'github-consumption': await materialize('github-consumption', Buffer.from(canonicalBytes(receipts.github.receipt))),
-    'gitlab-consumption': await materialize('gitlab-consumption', Buffer.from(canonicalBytes(receipts.gitlab.receipt))),
+    'github-consumption': await materialize('github-consumption', Buffer.from(canonicalBytes(receipts.github.result))),
+    'gitlab-consumption': await materialize('gitlab-consumption', Buffer.from(canonicalBytes(receipts.gitlab.result))),
   };
   const endpointDigests = Object.fromEntries(await Promise.all(REQUIRED_ENDPOINT_IDS.map(async (id) => [id, await digestFile(sources[id])])));
-  return { cli, imageReference: 'disposable://verjson-ci', imageDigest: imageDigest.trim(), endpointDigests, receipts, requestId, sources, tagRepository, mirrorRepository };
+  return { cli, imageReference: image.slice(0, image.lastIndexOf('@')), imageDigest, endpointDigests, receipts, requestId, sources, tagRepository, mirrorRepository };
 }
 
 async function runRelease(artifacts, interrupt) {
@@ -116,4 +130,4 @@ try {
   await cp(path.join(work, 'github.git'), path.join(output, 'github.git'), { recursive: true, errorOnExist: true, force: false });
   await cp(path.join(work, 'gitlab.git'), path.join(output, 'gitlab.git'), { recursive: true, errorOnExist: true, force: false });
   process.stdout.write(`disposable release complete after restart: ${manifestDigest(manifest)}\n`);
-} finally { await rm(work, { recursive: true, force: true }); }
+} finally { if (registryContainer) await execFileAsync('docker', ['rm', '--force', registryContainer]).catch(() => {}); await rm(work, { recursive: true, force: true }); }

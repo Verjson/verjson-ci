@@ -1,0 +1,27 @@
+name: disposable released GitHub consumption
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./adapters/github/action
+        with:
+          image: ${{ inputs.image }}
+          config: test/fixtures/success/verjson-ci.yml
+
+  reusable:
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      image: ${{ inputs.image }}
+      config: test/fixtures/success/verjson-ci.yml

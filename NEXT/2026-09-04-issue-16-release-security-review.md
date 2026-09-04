@@ -16,3 +16,5 @@ title: Harden unified release recovery and identity boundaries
 - Re-observe completed releases, anchor ledger heads in an independent monotonic store, and recover stable signed state across hard process exits at both persistence boundaries.
 - Execute independent GitHub and disposable GitLab CE fixture processes, create and mirror a real immutable Git tag, and snapshot manifest bytes before keyless signing or verification.
 - Remove unused repository/package write permissions from proof execution and isolate future public endpoint permissions behind issue #4 environments.
+- Consume the immutable staged GitHub tag through real `act` Action/reusable-workflow jobs and the mirrored tag through a real disposable GitLab CE runner.
+- Derive consumption digests from independently observed adapter results and prove full successor-process recovery after an endpoint-create hard kill without overwrite.
