@@ -40,8 +40,8 @@ jobs:
             --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header 'content-type: application/json' --data-binary @- \
             "$coordinator_origin/v1/authorize/github" | jq -r .capability)"
-          request_id="$(jq -n --arg image "$IMAGE" --arg scenario "$SCENARIO" --arg commit "$GITHUB_SHA" --arg adapterVersion "$ADAPTER_VERSION" \
-            '{image:$image,scenario:$scenario,commit:$commit,adapterVersion:$adapterVersion}' | curl --fail --silent --show-error \
+          request_id="$(jq -n --arg image "$IMAGE" --arg scenario "$SCENARIO" --arg commit "$GITHUB_SHA" --arg adapterVersion "$ADAPTER_VERSION" --arg requestNonce "github-$GITHUB_RUN_ID-$GITHUB_JOB" \
+            '{image:$image,scenario:$scenario,commit:$commit,adapterVersion:$adapterVersion,requestNonce:$requestNonce}' | curl --fail --silent --show-error \
             --location --max-redirs 0 --connect-timeout 5 --max-time 15 \
             --header 'content-type: application/json' --header "Authorization: Bearer $capability" \
             --data-binary @- "$coordinator_origin/v1/dispatch" | jq -r .requestId)"

@@ -30,9 +30,10 @@ export class JoseOidcVerifier {
 }
 
 export class OidcCoordinator {
-  constructor({ policies, trustedJwks, verifier, replayStore, capabilityStore, dispatcher, aggregator, clock = () => Date.now() }) {
+  constructor({ policies, trustedJwks, verifier, replayStore, capabilityStore, dispatcher, aggregator, dispatchLeaseMs = 30_000, clock = () => Date.now() }) {
     this.policies = validatePolicies(policies, trustedJwks);
-    Object.assign(this, { verifier, replayStore, capabilityStore, dispatcher, aggregator, clock });
+    if (!Number.isInteger(dispatchLeaseMs) || dispatchLeaseMs < 1_000 || dispatchLeaseMs > 60_000) throw new TypeError('dispatch lease must be between 1000 and 60000 ms');
+    Object.assign(this, { verifier, replayStore, capabilityStore, dispatcher, aggregator, dispatchLeaseMs, clock });
   }
   async authorize(token, forge) {
     const policy = this.policies[forge];
@@ -44,21 +45,23 @@ export class OidcCoordinator {
     if (!await this.replayStore.reserve(`${policy.issuer}:${claims.jti}`, claims.exp * 1000)) throw new AuthorizationError('OIDC token replayed');
     const capability = randomUUID();
     const expiresAt = Math.min(claims.exp * 1000, this.clock() + policy.capabilityTtlMs);
-    await this.capabilityStore.put(capability, { forge, commit: claims.sha, dispatch: policy.dispatch, expiresAt });
+    const requestScope = digestValues([forge, policy.issuer, claims.sub, claims.sha]);
+    await this.capabilityStore.put(capability, { forge, commit: claims.sha, dispatch: policy.dispatch, expiresAt, requestScope });
     return { capability, expiresAt };
   }
   async dispatch(capability, input) {
-    const grant = await this.capabilityStore.consume(capability);
+    const requestNonce = validateRequestNonce(input?.requestNonce);
+    const grant = await this.capabilityStore.bind(capability, digestValues([requestNonce, input?.image, input?.commit, input?.scenario, input?.adapterVersion]));
     if (!grant || grant.expiresAt <= this.clock()) throw new AuthorizationError('dispatch capability invalid or expired');
     const request = validateDispatch(input, grant.dispatch, grant.commit);
     const constraints = {
-      requestId: randomUUID(), nonce: randomUUID(), candidateDigest: request.image,
+      requestId: digestValues([grant.requestScope, requestNonce, request.image, request.commit, request.scenario, request.adapterVersion]).slice(7),
+      nonce: requestNonce, candidateDigest: request.image,
       commit: request.commit, scenario: request.scenario, adapterVersion: request.adapterVersion,
       fixtureProject: grant.dispatch.fixtureProject,
     };
     constraints.requestDigest = digestRequest(constraints);
     await this.aggregator.register(constraints, this.clock() + grant.dispatch.receiptTtlMs);
-    await this.retryDispatch(constraints.requestId);
     return { requestId: constraints.requestId, ...await this.aggregator.verdict(constraints.requestId) };
   }
   async retryDispatch(requestId) {
@@ -66,12 +69,14 @@ export class OidcCoordinator {
     if (!record) throw new ConformanceError('unknown conformance request');
     if (record.completed || record.expiresAt <= this.clock()) return this.aggregator.verdict(requestId);
     await Promise.all(['github', 'gitlab'].map(async (forge) => {
-      if (!await this.aggregator.claimDispatch(requestId, forge)) return;
+      const claimedAt = this.clock();
+      const lease = await this.aggregator.claimDispatch(requestId, forge, claimedAt, claimedAt + this.dispatchLeaseMs);
+      if (!lease) return;
       try {
         await this.dispatcher.dispatch(forge, record.request, { idempotencyKey: `${requestId}:${forge}` });
-        await this.aggregator.finishDispatch(requestId, forge, 'dispatched');
+        await this.aggregator.finishDispatch(requestId, forge, lease.fence, 'dispatched', this.clock());
       } catch {
-        await this.aggregator.finishDispatch(requestId, forge, 'failed');
+        await this.aggregator.finishDispatch(requestId, forge, lease.fence, 'failed', this.clock());
       }
     }));
     return this.aggregator.verdict(requestId);
@@ -86,11 +91,13 @@ export class ReceiptAggregator {
   }
   async register(request, expiresAt) {
     const dispatches = { github: { state: 'pending', attempts: 0 }, gitlab: { state: 'pending', attempts: 0 } };
-    if (!await this.receiptStore.register(request.requestId, { request, expiresAt, dispatches })) throw new ConformanceError('conformance request already registered');
+    if (await this.receiptStore.register(request.requestId, { request, expiresAt, dispatches })) return;
+    const existing = await this.receiptStore.get(request.requestId);
+    if (!existing || existing.request.requestDigest !== request.requestDigest) throw new ConformanceError('conformance request identity conflict');
   }
   request(requestId) { return this.receiptStore.get(requestId); }
-  claimDispatch(requestId, forge) { return this.receiptStore.claimDispatch(requestId, forge); }
-  finishDispatch(requestId, forge, state) { return this.receiptStore.finishDispatch(requestId, forge, state); }
+  claimDispatch(requestId, forge, now, leaseUntil) { return this.receiptStore.claimDispatch(requestId, forge, now, leaseUntil); }
+  finishDispatch(requestId, forge, fence, state, now) { return this.receiptStore.finishDispatch(requestId, forge, fence, state, now); }
   async accept(signedReceipt) {
     const verified = await this.verifier.verify(signedReceipt);
     const forge = this.signers.get(verified.signer);
@@ -165,13 +172,18 @@ function validateClaims(claims, policy, nowMs) {
 }
 
 function validateDispatch(input, policy, authorizedCommit) {
-  rejectUnknownKeys(input || {}, ['adapterVersion', 'commit', 'image', 'scenario'], 'dispatch request');
+  rejectUnknownKeys(input || {}, ['adapterVersion', 'commit', 'image', 'requestNonce', 'scenario'], 'dispatch request');
   if (typeof input?.image !== 'string' || !input.image.startsWith(`${policy.imageRepository}@`) || !SHA256.test(input.image.slice(policy.imageRepository.length + 1))) throw new ConformanceError('candidate image is not an allowed immutable digest');
   if (!COMMIT.test(input.commit || '')) throw new ConformanceError('commit must be a full lowercase SHA');
   if (input.commit !== authorizedCommit) throw new ConformanceError('commit does not match authenticated workload');
   if (!policy.scenarios.includes(input.scenario)) throw new ConformanceError('scenario is not allowed');
   if (!VERSION.test(input.adapterVersion || '')) throw new ConformanceError('adapter version must be SemVer');
   return input;
+}
+
+function validateRequestNonce(value) {
+  if (typeof value !== 'string' || !/^[0-9A-Za-z._-]{16,128}$/.test(value)) throw new ConformanceError('request nonce must be 16-128 URL-safe characters');
+  return value;
 }
 
 function validateReceipt(payload, forge, nowMs) {
@@ -189,8 +201,9 @@ function assertReceiptBound(receipt, request, forge) {
 }
 
 function digestRequest(request) {
-  return `sha256:${createHash('sha256').update(JSON.stringify([request.requestId, request.nonce, request.candidateDigest, request.commit, request.scenario, request.adapterVersion, request.fixtureProject])).digest('hex')}`;
+  return digestValues([request.requestId, request.nonce, request.candidateDigest, request.commit, request.scenario, request.adapterVersion, request.fixtureProject]);
 }
+function digestValues(values) { return `sha256:${createHash('sha256').update(JSON.stringify(values)).digest('hex')}`; }
 function rejectUnknownKeys(value, allowed, label) {
   const unknown = Object.keys(value || {}).filter((key) => !allowed.includes(key));
   if (unknown.length) throw new ConformanceError(`${label} contains unknown field: ${unknown[0]}`);
