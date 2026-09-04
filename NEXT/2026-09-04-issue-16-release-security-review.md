@@ -22,3 +22,4 @@ title: Harden unified release recovery and identity boundaries
 - Pass the provider-neutral conformance scenario through both GitHub adapter surfaces so their independently observed consumption results are identical.
 - Route the disposable GitHub consumption proof through canonical portable runner lanes while retaining a GitHub-hosted fallback for external adopters.
 - Route public CLI, OCI, forge tag/component, mirror, and consumption endpoints through the same closed plan using create-only GitHub release checkpoint generations, keyless ledger bundles, and rerun-safe quarantine reconciliation.
+- Anchor every remote checkpoint generation to a separately protected immutable annotated tag and reject suffix deletion, anchor deletion, binding mismatch, gaps, and generation races on restore.
