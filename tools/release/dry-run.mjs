@@ -96,7 +96,6 @@ async function runRelease(artifacts, interrupt) {
     },
   };
   const orchestrator = new ReleaseOrchestrator({
-    license: { assertPublishable: async () => { throw new Error('dry run crossed the public-release gate'); } },
     store: new FileReleaseStore(path.join(work, 'ledger'), { checkpointRoot: path.join(work, 'anchors') }),
     builder: { buildOnce: async () => artifacts }, conformance: { run: async () => artifacts.receipts },
     receiptVerifier: { verify: async (forge, envelope, expected) => {

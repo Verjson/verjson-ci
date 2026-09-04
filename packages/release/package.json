@@ -1,1 +1,1 @@
-{"name":"@verjson/ci-release","version":"0.0.0","private":true,"type":"module","exports":"./src/index.mjs"}
+{"name":"@verjson/ci-release","version":"0.0.0","private":true,"license":"Apache-2.0","type":"module","exports":"./src/index.mjs"}

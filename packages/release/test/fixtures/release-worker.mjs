@@ -12,7 +12,7 @@ const digest = (value) => createHash('sha256').update(canonicalBytes(value)).dig
 const signer = { identity: 'stable-worker-signer', signRecord: async (record) => digest(record), verifyRecord: async (record) => { const { signature, ...unsigned } = record; if (signature !== digest(unsigned)) throw new Error('signature mismatch'); } };
 const receipt = (forge) => ({ forge, requestId: 'worker-request', commit, imageDigest, resultDigest, verification: { issuer: `https://${forge}.invalid`, certificateIdentity: `${forge}-worker`, bundleDigest: `sha256:${'e'.repeat(64)}` } });
 const orchestrator = new ReleaseOrchestrator({
-  license: { assertPublishable: async () => {} }, store: new FileReleaseStore(path.join(root, 'ledger'), { checkpointRoot: path.join(root, 'anchors') }),
+  store: new FileReleaseStore(path.join(root, 'ledger'), { checkpointRoot: path.join(root, 'anchors') }),
   builder: { buildOnce: async () => ({ imageReference: 'localhost/worker', imageDigest, cli: { version, path: 'cli.tgz', sha256: 'd'.repeat(64) }, endpointDigests }) },
   conformance: { run: async () => ({ github: receipt('github'), gitlab: receipt('gitlab') }) }, receiptVerifier: { verify: async (forge) => receipt(forge) }, signer,
   publisher: { endpoints: async () => REQUIRED_ENDPOINT_IDS.map((id) => ({ id, digest: endpointDigests[id] })), readDigest: async ({ id }) => { try { return (await readFile(path.join(endpointRoot, id), 'utf8')).trim(); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; } }, create: async ({ id, digest: expected }) => { await writeFile(path.join(endpointRoot, id), `${expected}\n`, { flag: 'wx' }); if (mode === 'crash' && id === 'cli') process.exit(92); } },

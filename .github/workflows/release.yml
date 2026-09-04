@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       public:
-        description: Publish externally; blocked until issue #4 supplies a license.
+        description: Publish externally after protected-environment approval.
         required: true
         default: false
         type: boolean
@@ -120,12 +120,6 @@ jobs:
         with:
           ref: refs/heads/main
           persist-credentials: false
-      - name: Hold public promotion at the legal boundary
-        run: |
-          test -f LICENSE || {
-            echo '::error::Issue #4 must select a license before public publication.'
-            exit 1
-          }
       - name: Revalidate trusted public release code
         env:
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}

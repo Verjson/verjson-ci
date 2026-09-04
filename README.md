@@ -11,6 +11,14 @@ adapter, conformance fixtures, and release tooling share one repository and vers
 No stable release exists yet. Until the signed release pipeline is complete, examples use
 placeholders rather than a mutable branch or image tag.
 
+## Licensing
+
+The reusable core in this repository is available under Apache-2.0. Verjson may
+ship separately licensed paid capabilities, including advanced compliance and
+documentation features, from explicitly isolated packages. See
+[LICENSING.md](LICENSING.md) for the boundary rules; no paid package or
+proprietary license is present today.
+
 ## Portable contract
 
 ```yaml
@@ -99,5 +107,4 @@ manifests. GitHub remains a tested fallback when GitLab is the primary forge.
   [PR #17](https://github.com/Verjson/verjson-ci/pull/17).
 - External GitLab mirror provisioning is under mandatory review in
   [PR #15](https://github.com/Verjson/verjson-ci/pull/15).
-- The first public release is blocked on the license decision in
-  [issue #4](https://github.com/Verjson/verjson-ci/issues/4).
+- The public release license gate is resolved by the root Apache-2.0 license.

@@ -30,7 +30,7 @@ function trustedSigner() {
 function harness({ store = memoryStore(), endpoints, create, published = new Map() } = {}) {
   const endpointList = endpoints ?? REQUIRED_ENDPOINT_IDS.map((id) => ({ id, digest: endpointDigests[id] }));
   const orchestrator = new ReleaseOrchestrator({
-    license: { assertPublishable: async () => { throw new Error('dry run must not require a license'); } }, store,
+    store,
     builder: { buildOnce: async () => ({ imageReference: 'ghcr.io/verjson/verjson-ci', imageDigest, cli: { version: '1.2.3', path: 'verjson-ci-1.2.3.tgz', sha256: 'd'.repeat(64) }, endpointDigests }) },
     conformance: { run: async () => ({ github: { receipt: rawReceipt('github'), bundle: 'github.bundle' }, gitlab: { receipt: rawReceipt('gitlab'), bundle: 'gitlab.bundle' } }) },
     receiptVerifier: { verify: async (forge, envelope) => { assert.deepEqual(envelope.receipt, rawReceipt(forge)); return verifiedReceipt(forge); } },

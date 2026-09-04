@@ -18,6 +18,21 @@ test('standalone CLI archive embeds and reports the unified release version', as
     const metadata = JSON.parse(stdout);
     assert.equal(metadata.version, '1.2.3');
     assert.match(metadata.sha256, /^[0-9a-f]{64}$/);
+    const { stdout: archiveEntries } = await execFileAsync('tar', ['-tzf', metadata.path]);
+    assert.match(archiveEntries, /^package\/LICENSE$/m);
+    assert.match(archiveEntries, /^package\/LICENSING\.md$/m);
+    assert.match(archiveEntries, /^package\/artifact-licenses\.json$/m);
+    const { stdout: packedManifestSource } = await execFileAsync('tar', ['-xOzf', metadata.path, 'package/package.json']);
+    const packedManifest = JSON.parse(packedManifestSource);
+    assert.equal(packedManifest.license, 'Apache-2.0');
+    assert.equal(packedManifest.verjsonLicenseInventory, 'artifact-licenses.json');
+    const rootManifest = JSON.parse(await readFile('package.json', 'utf8'));
+    assert.deepEqual(packedManifest.dependencies, {
+      ajv: rootManifest.dependencies.ajv,
+      yaml: rootManifest.dependencies.yaml,
+    });
+    const { stdout: packedLicense } = await execFileAsync('tar', ['-xOzf', metadata.path, 'package/LICENSE']);
+    assert.equal(packedLicense, await readFile('LICENSE', 'utf8'));
 
     await execFileAsync('npm', ['install', '--prefix', install, metadata.path]);
     const output = join(directory, 'result.json');

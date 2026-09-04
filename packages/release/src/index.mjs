@@ -4,11 +4,10 @@ export class ReleaseConflictError extends Error {}
 export class ReleaseQuarantinedError extends Error { constructor(message, manifest, options) { super(message, options); this.manifest = manifest; } }
 
 export class ReleaseOrchestrator {
-  constructor({ license, store, builder, conformance, receiptVerifier, signer, publisher }) { Object.assign(this, { license, store, builder, conformance, receiptVerifier, signer, publisher }); }
+  constructor({ store, builder, conformance, receiptVerifier, signer, publisher }) { Object.assign(this, { store, builder, conformance, receiptVerifier, signer, publisher }); }
 
   async release(candidate) {
     validateCandidate(candidate);
-    if (!candidate.dryRun) await this.license.assertPublishable();
     let release = await this.store.reserve(candidate.version, candidate.commit, this.signer.identity);
     if (release === 'conflict') throw new ReleaseConflictError('release version already belongs to another commit');
     release = await this.#verifyHistory(release, candidate);
