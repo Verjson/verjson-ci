@@ -24,6 +24,14 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.1
+          terraform_wrapper: false
+      - name: Validate reproducible GitLab mirror module
+        run: |
+          terraform -chdir=terraform/gitlab-mirror/test/root init -backend=false -lockfile=readonly
+          terraform -chdir=terraform/gitlab-mirror/test/root validate
       - run: pnpm build
       - run: docker build --file container/Dockerfile --tag verjson-ci:test .
       - name: Exercise OCI entrypoint

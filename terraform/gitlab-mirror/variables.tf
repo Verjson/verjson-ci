@@ -34,3 +34,18 @@ variable "shared_runners_enabled" {
   type        = bool
   default     = false
 }
+
+variable "mirror_deploy_key_public_key" {
+  description = "Public half of the dedicated SSH deploy key authorized to create protected mirror tags."
+  type        = string
+  validation {
+    condition     = can(regex("^ssh-(ed25519|rsa) [A-Za-z0-9+/]+={0,3}( .*)?$", trimspace(var.mirror_deploy_key_public_key)))
+    error_message = "mirror_deploy_key_public_key must be an OpenSSH Ed25519 or RSA public key."
+  }
+}
+
+variable "mirror_deploy_key_title" {
+  description = "Audit-visible title for the dedicated mirror deploy key."
+  type        = string
+  default     = "verjson-ci release mirror"
+}
