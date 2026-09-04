@@ -10,6 +10,7 @@ const SHA = /^[0-9a-f]{40}$/;
 const HEX = /^[0-9a-f]{64}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const STATES = new Set(['staged', 'complete', 'quarantined']);
+export const REQUIRED_ENDPOINT_IDS = Object.freeze(['cli', 'oci', 'github-action', 'gitlab-component', 'gitlab-mirror', 'release-tag', 'github-consumption', 'gitlab-consumption']);
 const schemaValidator = new Ajv2020({ strict: true, strictRequired: false, formats: { uri: /^https:\/\/[^\s]+$/ } }).compile(schema);
 
 export function canonicalBytes(value) {
@@ -21,6 +22,7 @@ export function canonicalBytes(value) {
 export function manifestDigest(manifest) {
   return `sha256:${createHash('sha256').update(canonicalBytes(manifest)).digest('hex')}`;
 }
+export const objectDigest = manifestDigest;
 
 export function buildManifest(input) {
   const receipts = Object.fromEntries(['github', 'gitlab'].map((forge) => [forge, validateReceipt(input.receipts?.[forge], forge, input)]));
@@ -30,7 +32,7 @@ export function buildManifest(input) {
       cli: input.cli, oci: { reference: input.imageReference, digest: input.imageDigest },
       github: { path: 'adapters/github/action', ref: input.version }, gitlab: { path: 'templates/ci.yml', ref: input.version },
       schema: { path: 'verjson-ci.schema.json', version: 1 }, mirror: { terraform: 'terraform/gitlab-mirror', sync: 'tools/mirror/sync.mjs' },
-    }, receipts,
+    }, receipts, endpoints: Object.fromEntries(REQUIRED_ENDPOINT_IDS.map((id) => [id, input.endpointDigests?.[id]])),
   };
   validateManifest(manifest);
   return manifest;
@@ -38,7 +40,7 @@ export function buildManifest(input) {
 
 export function validateManifest(manifest) {
   if (!schemaValidator(manifest)) throw new Error(`release manifest schema invalid: ${schemaValidator.errors[0].instancePath || '/'} ${schemaValidator.errors[0].message}`);
-  exact(manifest, ['schemaVersion', 'version', 'commit', 'state', 'artifacts', 'receipts', ...(manifest?.state === 'quarantined' ? ['quarantineReason'] : [])], 'manifest');
+  exact(manifest, ['schemaVersion', 'version', 'commit', 'state', 'artifacts', 'receipts', 'endpoints', ...(manifest?.state === 'quarantined' ? ['quarantineReason'] : [])], 'manifest');
   if (manifest.schemaVersion !== 1 || !SEMVER.test(manifest.version) || !SHA.test(manifest.commit) || !STATES.has(manifest.state)) throw new Error('invalid release manifest identity');
   if (manifest.state === 'quarantined' ? !manifest.quarantineReason : 'quarantineReason' in manifest) throw new Error('invalid quarantine state');
   exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror'], 'artifacts');
@@ -48,6 +50,8 @@ export function validateManifest(manifest) {
   exact(oci, ['reference', 'digest'], 'OCI artifact');
   if (!oci.reference || !DIGEST.test(oci.digest)) throw new Error('invalid OCI artifact');
   exact(manifest.receipts, ['github', 'gitlab'], 'receipts');
+  exact(manifest.endpoints, REQUIRED_ENDPOINT_IDS, 'endpoints');
+  for (const id of REQUIRED_ENDPOINT_IDS) if (!DIGEST.test(manifest.endpoints[id])) throw new Error(`endpoint ${id} digest invalid`);
   for (const forge of ['github', 'gitlab']) {
     exact(manifest.artifacts[forge], ['path', 'ref'], `${forge} artifact`);
     if (!manifest.artifacts[forge].path || manifest.artifacts[forge].ref !== manifest.version) throw new Error(`${forge} artifact version differs`);
@@ -57,7 +61,12 @@ export function validateManifest(manifest) {
   return manifest;
 }
 
-export function completeManifest(manifest) { validateManifest(manifest); if (manifest.state !== 'staged') throw new Error('only a staged manifest can complete'); return validateManifest({ ...manifest, state: 'complete' }); }
+export function completeManifest(manifest, publishedEndpoints) {
+  validateManifest(manifest);
+  if (manifest.state !== 'staged') throw new Error('only a staged manifest can complete');
+  if (!Array.isArray(publishedEndpoints) || new Set(publishedEndpoints).size !== publishedEndpoints.length || [...publishedEndpoints].sort().join() !== [...REQUIRED_ENDPOINT_IDS].sort().join()) throw new Error('all required endpoints must be reconciled before completion');
+  return validateManifest({ ...manifest, state: 'complete' });
+}
 export function quarantineManifest(manifest, reason) { validateManifest(manifest); if (!reason) throw new Error('quarantine reason required'); const { quarantineReason: _, ...base } = manifest; return validateManifest({ ...base, state: 'quarantined', quarantineReason: reason }); }
 
 function validateReceipt(receipt, forge, input) {

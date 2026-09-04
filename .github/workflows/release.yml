@@ -8,72 +8,103 @@ on:
         required: true
         type: string
       commit:
-        description: Full commit SHA; defaults to the dispatched ref.
-        required: false
-        type: string
-      dry_run:
-        description: Exercise all release invariants without tags or publication.
+        description: Full commit SHA at the protected main head.
         required: true
-        default: true
+        type: string
+      public:
+        description: Publish externally; blocked until issue #4 supplies a license.
+        required: true
+        default: false
         type: boolean
-
-permissions:
-  contents: write
-  id-token: write
-  packages: write
 
 concurrency:
   group: release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    environment: verjson-ci-release
+  validate:
+    permissions:
+      contents: read
     runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
-    timeout-minutes: 45
+    timeout-minutes: 20
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      version: ${{ steps.identity.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Require protected main dispatch and head
+        id: identity
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$RELEASE_COMMIT" = "$(git rev-parse refs/remotes/origin/main)"
+          echo "commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.19.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  release:
+    needs: validate
+    environment: verjson-ci-release
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out trusted release code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Revalidate trusted code and candidate identity
+        env:
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.19.0
       - uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb
         with:
           cosign-release: v2.4.3
-      - name: Validate immutable release identity
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_COMMIT: ${{ inputs.commit || github.sha }}
-        run: |
-          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]
-          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - name: Exercise restart-safe release protocol
+      - name: Exercise disposable CLI, OCI, forge, mirror, tag, and consumption endpoints
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_COMMIT: ${{ inputs.commit || github.sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
         run: node tools/release/dry-run.mjs "$RELEASE_VERSION" "$RELEASE_COMMIT" .release-proof
       - name: Keylessly sign release proof
         run: node tools/release/cosign.mjs sign .release-proof/manifest.json .release-proof/manifest.sigstore.json
-      - name: Verify exact release workflow identity
+      - name: Verify exact trusted release-workflow identity
         run: node tools/release/cosign.mjs verify .release-proof/manifest.json .release-proof/manifest.sigstore.json
-      - name: Refuse public release until the legal gate is resolved
-        if: ${{ !inputs.dry_run }}
+      - name: Enforce public-release legal gate
+        if: ${{ inputs.public }}
         run: |
           test -f LICENSE || {
             echo '::error::Issue #4 must select a license before the first public release.'
             exit 1
           }
-          echo '::error::Public publication remains disabled until issue #4 is resolved.'
+          echo '::error::Public promotion is intentionally held by issue #4; the technical pipeline proof is complete.'
           exit 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: release-proof-${{ inputs.version }}
+          name: release-proof-${{ needs.validate.outputs.version }}
           path: .release-proof/
           if-no-files-found: error

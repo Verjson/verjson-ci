@@ -29,9 +29,12 @@ export async function verifyReceiptEnvelope(forge, envelope, expected, run = run
   const directory = await mkdtemp(path.join(tmpdir(), 'verjson-ci-receipt-'));
   try {
     const receiptPath = path.join(directory, 'receipt.json');
+    const bundlePath = path.join(directory, 'bundle.json');
+    const bundleBytes = await readFile(envelope.bundle);
     await writeFile(receiptPath, canonicalBytes(receipt));
-    await verifyBlob(receiptPath, envelope.bundle, policy, run);
-    const bundleDigest = `sha256:${createHash('sha256').update(await readFile(envelope.bundle)).digest('hex')}`;
+    await writeFile(bundlePath, bundleBytes, { flag: 'wx', mode: 0o600 });
+    await verifyBlob(receiptPath, bundlePath, policy, run);
+    const bundleDigest = `sha256:${createHash('sha256').update(bundleBytes).digest('hex')}`;
     return { ...receipt, verification: { issuer: policy.issuer, certificateIdentity: policy.identity, bundleDigest } };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

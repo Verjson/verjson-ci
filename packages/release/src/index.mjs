@@ -1,15 +1,15 @@
-import { buildManifest, completeManifest, manifestDigest, quarantineManifest, validateManifest } from '../../../tools/release/manifest.mjs';
+import { buildManifest, completeManifest, manifestDigest, objectDigest, quarantineManifest, REQUIRED_ENDPOINT_IDS, validateManifest } from '../../../tools/release/manifest.mjs';
 
 export class ReleaseConflictError extends Error {}
 export class ReleaseQuarantinedError extends Error { constructor(message, manifest, options) { super(message, options); this.manifest = manifest; } }
 
 export class ReleaseOrchestrator {
-  constructor({ license, store, builder, conformance, receiptVerifier, signer, tagger, publisher }) { Object.assign(this, { license, store, builder, conformance, receiptVerifier, signer, tagger, publisher }); }
+  constructor({ license, store, builder, conformance, receiptVerifier, signer, publisher }) { Object.assign(this, { license, store, builder, conformance, receiptVerifier, signer, publisher }); }
 
   async release(candidate) {
     validateCandidate(candidate);
     if (!candidate.dryRun) await this.license.assertPublishable();
-    let release = await this.store.reserve(candidate.version, candidate.commit);
+    let release = await this.store.reserve(candidate.version, candidate.commit, this.signer.identity);
     if (release === 'conflict') throw new ReleaseConflictError('release version already belongs to another commit');
     release = await this.#verifyHistory(release, candidate);
     if (release.state === 'complete') return release.manifest;
@@ -30,9 +30,9 @@ export class ReleaseOrchestrator {
         staged = buildManifest({ ...candidate, ...artifacts, receipts });
         release = await this.#transition(release, 'staged', { manifest: staged, manifestDigest: manifestDigest(staged) });
       }
-      if (!candidate.dryRun) await this.tagger.createImmutable(candidate.version, candidate.commit);
       release = await this.#publishCreateOnly(release, staged, candidate.dryRun);
-      const complete = completeManifest(staged);
+      const reconciledEndpoints = release.transitions.filter((item) => item.state === 'published').map((item) => item.endpoint);
+      const complete = completeManifest(staged, reconciledEndpoints);
       await this.#transition(release, 'complete', { manifest: complete, manifestDigest: manifestDigest(complete) });
       return complete;
     } catch (error) {
@@ -48,11 +48,12 @@ export class ReleaseOrchestrator {
   }
 
   async #verifyHistory(release, candidate) {
-    if (release.version !== candidate.version || release.commit !== candidate.commit) throw new ReleaseConflictError('reserved release identity differs from candidate');
+    if (release.version !== candidate.version || release.commit !== candidate.commit || release.signerIdentity !== this.signer.identity) throw new ReleaseConflictError('reserved release or signer identity differs from candidate');
     let lastState = 'reserved';
+    let previousRecordDigest = release.anchor;
     for (let index = 0; index < release.transitions.length; index += 1) {
       const transition = release.transitions[index];
-      if (transition.sequence !== index + 1 || transition.previousState !== lastState) throw new ReleaseConflictError('release history is not append-only');
+      if (transition.sequence !== index + 1 || transition.previousState !== lastState || transition.previousRecordDigest !== previousRecordDigest) throw new ReleaseConflictError('release history hash chain is invalid');
       await this.signer.verifyRecord(transition);
       assertTransition(transition, release.transitions[index - 1]);
       if (transition.manifest) {
@@ -60,13 +61,15 @@ export class ReleaseOrchestrator {
         if (transition.manifest.version !== candidate.version || transition.manifest.commit !== candidate.commit || transition.manifestDigest !== manifestDigest(transition.manifest)) throw new ReleaseConflictError('persisted manifest identity or digest differs');
       }
       lastState = transition.state;
+      previousRecordDigest = objectDigest(transition);
     }
+    if (release.head !== previousRecordDigest) throw new ReleaseConflictError('release ledger head does not match its anchored history');
     const latest = release.transitions.at(-1);
     return { ...release, state: latest?.state ?? 'reserved', manifest: [...release.transitions].reverse().find((item) => item.manifest)?.manifest, retryable: latest?.retryable };
   }
 
   async #transition(release, state, payload) {
-    const unsigned = { sequence: release.transitions.length + 1, previousState: release.state, state, ...payload };
+    const unsigned = { sequence: release.transitions.length + 1, previousState: release.state, previousRecordDigest: release.head, state, ...payload };
     const transition = { ...unsigned, signature: await this.signer.signRecord(unsigned) };
     const next = await this.store.append(release, transition);
     if (next === 'conflict') throw new ReleaseConflictError('release ledger changed concurrently');
@@ -74,12 +77,18 @@ export class ReleaseOrchestrator {
   }
 
   async #publishCreateOnly(release, manifest, dryRun) {
-    for (const endpoint of await this.publisher.endpoints(manifest, { dryRun })) {
+    const endpoints = await this.publisher.endpoints(manifest, { dryRun });
+    const ids = endpoints.map(({ id }) => id);
+    if (new Set(ids).size !== ids.length || [...ids].sort().join() !== [...REQUIRED_ENDPOINT_IDS].sort().join()) throw new ReleaseConflictError('publication plan is missing, duplicate, or unknown endpoints');
+    for (const endpoint of endpoints) {
       try {
         const prior = release.transitions.find((item) => item.state === 'published' && item.endpoint === endpoint.id);
-        if (prior) { if (prior.digest !== endpoint.digest) throw new ReleaseConflictError(`ledger digest differs for ${endpoint.id}`); continue; }
+        if (endpoint.digest !== manifest.endpoints[endpoint.id]) throw new ReleaseConflictError(`manifest digest differs for ${endpoint.id}`);
+        if (prior && prior.digest !== endpoint.digest) throw new ReleaseConflictError(`ledger digest differs for ${endpoint.id}`);
         const existing = await this.publisher.readDigest(endpoint);
         if (existing && existing !== endpoint.digest) throw new ReleaseConflictError(`published content differs for ${endpoint.id}`);
+        if (prior && !existing) throw new ReleaseConflictError(`published endpoint disappeared for ${endpoint.id}`);
+        if (prior) continue;
         if (!existing) await this.publisher.create(endpoint);
         if (await this.publisher.readDigest(endpoint) !== endpoint.digest) throw Object.assign(new Error(`publication verification failed for ${endpoint.id}`), { phase: endpoint.id });
         release = await this.#transition(release, 'published', { endpoint: endpoint.id, digest: endpoint.digest });

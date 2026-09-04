@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FileReleaseStore } from '../src/file-store.mjs';
 import { ReleaseConflictError, ReleaseOrchestrator, ReleaseQuarantinedError } from '../src/index.mjs';
-import { canonicalBytes } from '../../../tools/release/manifest.mjs';
+import { canonicalBytes, objectDigest, REQUIRED_ENDPOINT_IDS } from '../../../tools/release/manifest.mjs';
 
 const commit = 'a'.repeat(40);
 const imageDigest = `sha256:${'b'.repeat(64)}`;
@@ -14,24 +14,26 @@ const resultDigest = `sha256:${'c'.repeat(64)}`;
 const candidate = { version: '1.2.3', commit, requestId: 'request-1', dryRun: true };
 const rawReceipt = (forge) => ({ forge, requestId: 'request-1', commit, imageDigest, resultDigest });
 const verifiedReceipt = (forge) => ({ ...rawReceipt(forge), verification: { issuer: `https://${forge}.example`, certificateIdentity: `${forge}-main`, bundleDigest: `sha256:${'e'.repeat(64)}` } });
+const endpointDigests = Object.fromEntries(REQUIRED_ENDPOINT_IDS.map((id, index) => [id, `sha256:${String(index + 1).repeat(64)}`]));
+const signerIdentity = 'test-release-signer';
 
 function memoryStore(initial) {
-  let release = initial ?? { version: candidate.version, commit, transitions: [] };
-  return { reserve: async () => structuredClone(release), append: async (before, transition) => { if (before.transitions.length !== release.transitions.length) return 'conflict'; release = { ...release, transitions: [...release.transitions, transition] }; return structuredClone(release); }, inspect: () => release };
+  let release = initial ?? { version: candidate.version, commit, signerIdentity, anchor: `sha256:${'0'.repeat(64)}`, head: `sha256:${'0'.repeat(64)}`, transitions: [] };
+  return { reserve: async () => structuredClone(release), append: async (before, transition) => { if (before.transitions.length !== release.transitions.length) return 'conflict'; release = { ...release, head: objectDigest(transition), transitions: [...release.transitions, transition] }; return structuredClone(release); }, inspect: () => release };
 }
 function trustedSigner() {
   const digest = (record) => createHash('sha256').update(canonicalBytes(record)).digest('hex');
-  return { signRecord: async (record) => digest(record), verifyRecord: async (record) => { const { signature, ...unsigned } = record; if (signature !== digest(unsigned)) throw new Error('invalid signed ledger record'); } };
+  return { identity: signerIdentity, signRecord: async (record) => digest(record), verifyRecord: async (record) => { const { signature, ...unsigned } = record; if (signature !== digest(unsigned)) throw new Error('invalid signed ledger record'); } };
 }
 function harness({ store = memoryStore(), endpoints, create } = {}) {
   const published = new Map();
-  const endpointList = endpoints ?? [{ id: 'github-action', digest: `sha256:${'1'.repeat(64)}` }, { id: 'gitlab-component', digest: `sha256:${'2'.repeat(64)}` }];
+  const endpointList = endpoints ?? REQUIRED_ENDPOINT_IDS.map((id) => ({ id, digest: endpointDigests[id] }));
   const orchestrator = new ReleaseOrchestrator({
     license: { assertPublishable: async () => { throw new Error('dry run must not require a license'); } }, store,
-    builder: { buildOnce: async () => ({ imageReference: 'ghcr.io/verjson/verjson-ci', imageDigest, cli: { version: '1.2.3', path: 'verjson-ci-1.2.3.tgz', sha256: 'd'.repeat(64) } }) },
+    builder: { buildOnce: async () => ({ imageReference: 'ghcr.io/verjson/verjson-ci', imageDigest, cli: { version: '1.2.3', path: 'verjson-ci-1.2.3.tgz', sha256: 'd'.repeat(64) }, endpointDigests }) },
     conformance: { run: async () => ({ github: { receipt: rawReceipt('github'), bundle: 'github.bundle' }, gitlab: { receipt: rawReceipt('gitlab'), bundle: 'gitlab.bundle' } }) },
     receiptVerifier: { verify: async (forge, envelope) => { assert.deepEqual(envelope.receipt, rawReceipt(forge)); return verifiedReceipt(forge); } },
-    signer: trustedSigner(), tagger: { createImmutable: async () => { throw new Error('dry run must not tag'); } },
+    signer: trustedSigner(),
     publisher: { endpoints: async () => endpointList, readDigest: async (endpoint) => published.get(endpoint.id), create: async (endpoint) => { if (create) await create(endpoint, published); else published.set(endpoint.id, endpoint.digest); } },
   });
   return { orchestrator, store, published };
@@ -40,8 +42,8 @@ function harness({ store = memoryStore(), endpoints, create } = {}) {
 test('dry run signs verified receipts and completes an append-only endpoint ledger', async () => {
   const { orchestrator, store } = harness();
   assert.equal((await orchestrator.release(candidate)).state, 'complete');
-  assert.deepEqual(store.inspect().transitions.map((item) => item.state), ['staged', 'published', 'published', 'complete']);
-  assert.deepEqual(store.inspect().transitions.filter((item) => item.endpoint).map((item) => item.endpoint), ['github-action', 'gitlab-component']);
+  assert.equal(store.inspect().transitions.filter((item) => item.state === 'published').length, REQUIRED_ENDPOINT_IDS.length);
+  assert.deepEqual(store.inspect().transitions.filter((item) => item.endpoint).map((item) => item.endpoint), REQUIRED_ENDPOINT_IDS);
 });
 
 test('rejects forged receipt before staging a release', async () => {
@@ -62,16 +64,16 @@ test('restart after one publication creates only the missing endpoint', async ()
     const store = new FileReleaseStore(directory); let crash = true; const created = [];
     const setup = harness({ store, create: async (endpoint, published) => { created.push(endpoint.id); published.set(endpoint.id, endpoint.digest); if (endpoint.id === 'gitlab-component' && crash) { crash = false; throw Object.assign(new Error('interrupted'), { code: 'network', retryable: true, phase: endpoint.id }); } } });
     await assert.rejects(() => setup.orchestrator.release(candidate), ReleaseQuarantinedError);
-    assert.deepEqual(created, ['github-action', 'gitlab-component']);
+    assert.deepEqual(created, REQUIRED_ENDPOINT_IDS.slice(0, 4));
     await setup.orchestrator.release(candidate);
-    assert.deepEqual(created, ['github-action', 'gitlab-component']);
-    const history = await store.reserve(candidate.version, commit);
-    assert.deepEqual(history.transitions.map((item) => item.state), ['staged', 'published', 'quarantined', 'staged', 'published', 'complete']);
+    assert.deepEqual(created, REQUIRED_ENDPOINT_IDS);
+    const history = await store.reserve(candidate.version, commit, signerIdentity);
+    assert.equal(history.transitions.at(-1).state, 'complete');
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('refuses a conflicting reservation and published digest', async () => {
-  const conflict = memoryStore({ version: candidate.version, commit: 'f'.repeat(40), transitions: [] });
+  const conflict = memoryStore({ version: candidate.version, commit: 'f'.repeat(40), signerIdentity, anchor: `sha256:${'0'.repeat(64)}`, head: `sha256:${'0'.repeat(64)}`, transitions: [] });
   await assert.rejects(() => harness({ store: conflict }).orchestrator.release(candidate), ReleaseConflictError);
   const setup = harness(); setup.published.set('github-action', `sha256:${'9'.repeat(64)}`);
   await assert.rejects(() => setup.orchestrator.release(candidate), ReleaseQuarantinedError);
@@ -90,4 +92,35 @@ test('preserves publication and quarantine persistence failures', async () => {
     assert.deepEqual(error.errors.map((item) => item.message), ['registry unavailable', 'ledger unavailable']);
     return true;
   });
+});
+
+test('rejects incomplete, duplicate, and unknown endpoint plans', async () => {
+  const complete = REQUIRED_ENDPOINT_IDS.map((id) => ({ id, digest: endpointDigests[id] }));
+  for (const endpoints of [complete.slice(1), [...complete, complete[0]], [...complete.slice(0, -1), { id: 'unknown', digest: endpointDigests.cli }]]) {
+    await assert.rejects(() => harness({ endpoints }).orchestrator.release(candidate), ReleaseQuarantinedError);
+  }
+});
+
+test('detects suffix truncation using the separately persisted ledger head', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'release-ledger-truncation-'));
+  try {
+    const store = new FileReleaseStore(directory); const setup = harness({ store });
+    await setup.orchestrator.release(candidate);
+    const releaseDirectory = path.join(directory, candidate.version);
+    const records = (await readdir(releaseDirectory)).filter((name) => /^\d{8}\.json$/.test(name)).sort();
+    await unlink(path.join(releaseDirectory, records.at(-1)));
+    await assert.rejects(() => store.reserve(candidate.version, commit, signerIdentity), /suffix was truncated/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('re-observes ledgered endpoints and rejects a disappeared artifact on resume', async () => {
+  let interrupted = false;
+  const setup = harness({ create: async (endpoint, published) => {
+    published.set(endpoint.id, endpoint.digest);
+    if (!interrupted && endpoint.id === 'gitlab-component') { interrupted = true; throw Object.assign(new Error('interrupted'), { retryable: true }); }
+  } });
+  await assert.rejects(() => setup.orchestrator.release(candidate), ReleaseQuarantinedError);
+  setup.published.delete('cli');
+  await assert.rejects(() => setup.orchestrator.release(candidate), (error) => error instanceof ReleaseQuarantinedError && /quarantined/.test(error.message));
+  assert.equal(setup.store.inspect().transitions.at(-1).retryable, false);
 });
