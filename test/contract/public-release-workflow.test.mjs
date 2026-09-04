@@ -11,5 +11,6 @@ test('public workflow delegates all endpoints to durable orchestrator and signs 
   assert.doesNotMatch(commands, /docker buildx build.*--push|git push/);
   assert.match(commands, /verjson-state-/);
   assert.match(commands, /verify-anchor-ruleset\.mjs/); assert.doesNotMatch(source, /VERJSON_CI_RELEASE_ANCHORS_PROTECTED/);
+  assert.doesNotMatch(source, /Issue #4|test -f LICENSE/);
   assert.equal(workflow.jobs['publish-github'], undefined); assert.equal(workflow.jobs['publish-gitlab'], undefined);
 });

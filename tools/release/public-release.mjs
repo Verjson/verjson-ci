@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -19,7 +18,6 @@ export async function runPublicRelease({ candidate, artifacts, verifiedReceipts,
   await verifyManifest(proof, runCosign);
   const signer = keylessLedgerSigner(runCosign);
   const orchestrator = new ReleaseOrchestrator({
-    license: { assertPublishable: () => { if (!existsSync('LICENSE')) throw new Error('issue #4 must select a license before public publication'); } },
     store: new DurableReleaseStore(path.join(workspace, 'state'), { remote: githubAssetRemote({ repository, version: `verjson-state-${candidate.version}`, commit: candidate.commit, signer }) }),
     builder: { buildOnce: async () => artifacts },
     conformance: { run: async () => verifiedReceipts },

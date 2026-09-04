@@ -22,4 +22,7 @@ Repository rules must protect `refs/tags/verjson-release-state-anchor-verjson-st
 
 The public job restores the newest checkpoint before doing work and re-observes CLI, OCI, GitHub tag/Action, GitLab mirror/component, and both consumption-receipt endpoints. A partial GitLab failure is quarantined durably after any already-created GitHub endpoints; an approved rerun resumes that history and creates only missing endpoints. Only after both independently produced consumer results match does the orchestrator write `complete`, snapshot the manifest bytes, and keylessly sign and verify the final public manifest.
 
-Issue #4 remains the only gate to the first public release. Until a license is selected, a non-dry-run dispatch fails before any tag or publication. Dry runs remain available so legal policy does not block release engineering verification.
+The reusable core is published under the repository's root Apache-2.0 license.
+The release workflow no longer carries a temporary license-decision gate. Any future
+non-Apache capability must satisfy the isolation and metadata requirements in
+[`LICENSING.md`](../../LICENSING.md) before entering the release graph.
