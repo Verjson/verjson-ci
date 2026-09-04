@@ -92,7 +92,7 @@ async function runRelease(artifacts, interrupt) {
       if (endpoint.id === 'release-tag') await execFileAsync('git', ['--git-dir', artifacts.tagRepository, 'tag', version, commit]);
       else if (endpoint.id === 'gitlab-mirror') await execFileAsync('git', ['--git-dir', artifacts.tagRepository, 'push', artifacts.mirrorRepository, `refs/tags/${version}:refs/tags/${version}`]);
       else await cp(endpoint.source, path.join(endpointRoot, endpoint.id), { errorOnExist: true, force: false });
-      if (interrupt && !interrupted && endpoint.id === 'gitlab-mirror') { interrupted = true; throw Object.assign(new Error('simulated process interruption'), { code: 'interrupted', retryable: true, phase: endpoint.id }); }
+      if (interrupt && !interrupted && endpoint.id === 'github-consumption') { interrupted = true; throw Object.assign(new Error('simulated process interruption'), { code: 'interrupted', retryable: true, phase: endpoint.id }); }
     },
   };
   const orchestrator = new ReleaseOrchestrator({
