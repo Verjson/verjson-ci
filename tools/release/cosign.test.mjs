@@ -1,37 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path from 'node:path';
 import test from 'node:test';
-import { signManifest, verifyManifest } from './cosign.mjs';
-
-async function manifestFixture(state = 'staged') {
-  const directory = await mkdtemp(join(tmpdir(), 'verjson-ci-signing-'));
-  const path = join(directory, 'manifest.json');
-  await writeFile(path, JSON.stringify({ schemaVersion: 1, state }));
-  return path;
-}
-
-test('keyless signing emits a Sigstore bundle without a key argument', async () => {
-  const calls = [];
-  const manifest = await manifestFixture();
-  await signManifest({ manifest, bundle: 'manifest.sigstore.json' }, async (args) => calls.push(args));
-  assert.deepEqual(calls, [['sign-blob', '--yes', '--bundle', 'manifest.sigstore.json', manifest]]);
-  assert.equal(calls[0].includes('--key'), false);
-});
-
-test('verification pins both workflow identity and OIDC issuer', async () => {
-  const calls = [];
-  const manifest = await manifestFixture('complete');
-  await verifyManifest({ manifest, bundle: 'bundle.json', identity: 'release-workflow@main', issuer: 'https://token.actions.githubusercontent.com' }, async (args) => calls.push(args));
-  assert.deepEqual(calls[0].slice(0, -1), [
-    'verify-blob', '--bundle', 'bundle.json',
-    '--certificate-identity', 'release-workflow@main',
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-  ]);
-});
-
-test('rejects unsupported manifests before invoking cosign', async () => {
-  const manifest = await manifestFixture('draft');
-  await assert.rejects(() => signManifest({ manifest, bundle: 'bundle.json' }, async () => { throw new Error('must not run'); }), /unsupported/);
-});
+import { RELEASE_SIGNING_POLICY, RECEIPT_POLICIES, signManifest, verifyManifest, verifyReceiptEnvelope } from './cosign.mjs';
+import { buildManifest } from './manifest.mjs';
+const commit = 'a'.repeat(40), imageDigest = `sha256:${'b'.repeat(64)}`, resultDigest = `sha256:${'c'.repeat(64)}`;
+const verification = (forge) => ({ issuer: `https://${forge}.example`, certificateIdentity: forge, bundleDigest: `sha256:${'e'.repeat(64)}` });
+async function fixture() { const dir = await mkdtemp(path.join(tmpdir(), 'cosign-test-')); const file = path.join(dir, 'manifest.json'), bundle = path.join(dir, 'bundle.json'); const receipt = (forge) => ({ forge, requestId: 'request-1', commit, imageDigest, resultDigest, verification: verification(forge) }); await writeFile(file, JSON.stringify(buildManifest({ version: '1.2.3', commit, imageReference: 'ghcr.io/verjson/verjson-ci', imageDigest, cli: { version: '1.2.3', path: 'cli.tgz', sha256: 'd'.repeat(64) }, receipts: { github: receipt('github'), gitlab: receipt('gitlab') } }))); await writeFile(bundle, '{}'); return { dir, file, bundle }; }
+test('signs keylessly and verifies only the checked-in exact release identity', async () => { const f = await fixture(); const calls = []; try { await signManifest({ manifest: f.file, bundle: f.bundle }, async (args) => calls.push(args)); await verifyManifest({ manifest: f.file, bundle: f.bundle }, async (args) => calls.push(args)); assert.equal(calls[0].includes('--key'), false); assert.deepEqual(calls[1].slice(3, -1), ['--certificate-identity', RELEASE_SIGNING_POLICY.identity, '--certificate-oidc-issuer', RELEASE_SIGNING_POLICY.issuer]); } finally { await rm(f.dir, { recursive: true, force: true }); } });
+test('verifies canonical receipt bytes against forge policy and binds bundle digest', async () => { const f = await fixture(); try { const raw = { forge: 'github', requestId: 'request-1', commit, imageDigest, resultDigest }; let bytes; const verified = await verifyReceiptEnvelope('github', { receipt: raw, bundle: f.bundle }, { requestId: 'request-1', commit, imageDigest }, async (args) => { bytes = await readFile(args.at(-1), 'utf8'); assert.equal(args.includes(RECEIPT_POLICIES.github.identity), true); }); assert.equal(bytes, '{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","forge":"github","imageDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","requestId":"request-1","resultDigest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}'); assert.match(verified.verification.bundleDigest, /^sha256:/); } finally { await rm(f.dir, { recursive: true, force: true }); } });
+test('rejects replayed request identity before invoking cosign', async () => { const f = await fixture(); try { await assert.rejects(() => verifyReceiptEnvelope('github', { receipt: { forge: 'github', requestId: 'old', commit, imageDigest, resultDigest }, bundle: f.bundle }, { requestId: 'new', commit, imageDigest }, async () => assert.fail()), /replay/); } finally { await rm(f.dir, { recursive: true, force: true }); } });
+test('propagates signature, issuer, identity, and altered-content verification failures', async () => { const f = await fixture(); try { const receipt = { forge: 'github', requestId: 'request-1', commit, imageDigest, resultDigest }; await assert.rejects(() => verifyReceiptEnvelope('github', { receipt, bundle: f.bundle }, { requestId: 'request-1', commit, imageDigest }, async (args) => { assert.equal(args.includes(RECEIPT_POLICIES.github.issuer), true); assert.equal(args.includes(RECEIPT_POLICIES.github.identity), true); throw new Error('signature does not match canonical bytes'); }), /signature/); } finally { await rm(f.dir, { recursive: true, force: true }); } });

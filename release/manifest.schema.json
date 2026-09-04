@@ -10,7 +10,21 @@
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "state": { "enum": ["staged", "complete", "quarantined"] },
     "quarantineReason": { "type": "string", "minLength": 1 },
-    "artifacts": { "type": "object" },
-    "receipts": { "type": "object", "required": ["github", "gitlab"] }
+    "artifacts": { "type": "object", "additionalProperties": false, "required": ["cli", "oci", "github", "gitlab", "schema", "mirror"], "properties": {
+      "cli": { "type": "object", "additionalProperties": false, "required": ["version", "path", "sha256"], "properties": { "version": { "type": "string" }, "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+      "oci": { "type": "object", "additionalProperties": false, "required": ["reference", "digest"], "properties": { "reference": { "type": "string", "minLength": 1 }, "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } } },
+      "github": { "$ref": "#/$defs/forgeArtifact" }, "gitlab": { "$ref": "#/$defs/forgeArtifact" },
+      "schema": { "type": "object", "additionalProperties": false, "required": ["path", "version"], "properties": { "path": { "const": "verjson-ci.schema.json" }, "version": { "const": 1 } } },
+      "mirror": { "type": "object", "additionalProperties": false, "required": ["terraform", "sync"], "properties": { "terraform": { "type": "string", "minLength": 1 }, "sync": { "type": "string", "minLength": 1 } } }
+    } },
+    "receipts": { "type": "object", "additionalProperties": false, "required": ["github", "gitlab"], "properties": { "github": { "$ref": "#/$defs/receipt" }, "gitlab": { "$ref": "#/$defs/receipt" } } }
+  },
+  "allOf": [{ "if": { "properties": { "state": { "const": "quarantined" } } }, "then": { "required": ["quarantineReason"] }, "else": { "not": { "required": ["quarantineReason"] } } }],
+  "$defs": {
+    "forgeArtifact": { "type": "object", "additionalProperties": false, "required": ["path", "ref"], "properties": { "path": { "type": "string", "minLength": 1 }, "ref": { "type": "string" } } },
+    "receipt": { "type": "object", "additionalProperties": false, "required": ["forge", "requestId", "commit", "imageDigest", "resultDigest", "verification"], "properties": {
+      "forge": { "enum": ["github", "gitlab"] }, "requestId": { "type": "string", "minLength": 1 }, "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }, "imageDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "resultDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+      "verification": { "type": "object", "additionalProperties": false, "required": ["issuer", "certificateIdentity", "bundleDigest"], "properties": { "issuer": { "type": "string", "format": "uri" }, "certificateIdentity": { "type": "string", "minLength": 1 }, "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } } }
+    } }
   }
 }
