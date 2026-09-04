@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { FRAMEWORK_PACKS } from '../../packages/compliance/src/index.mjs';
+import licenseInventory from '../../release/artifact-licenses.json' with { type: 'json' };
 import schemaV1 from '../../release/manifest-v1.schema.json' with { type: 'json' };
 import schemaV2 from '../../release/manifest.schema.json' with { type: 'json' };
 
@@ -26,6 +28,7 @@ export function manifestDigest(manifest) {
   return `sha256:${createHash('sha256').update(canonicalBytes(manifest)).digest('hex')}`;
 }
 export const objectDigest = manifestDigest;
+export const LICENSE_INVENTORY_DIGEST = `sha256:${createHash('sha256').update(readFileSync(new URL('../../release/artifact-licenses.json', import.meta.url))).digest('hex')}`;
 
 export function buildManifest(input) {
   const receipts = Object.fromEntries(['github', 'gitlab'].map((forge) => [forge, validateReceipt(input.receipts?.[forge], forge, input)]));
@@ -36,6 +39,7 @@ export function buildManifest(input) {
       github: { path: 'adapters/github/action', ref: input.version }, gitlab: { path: 'templates/ci.yml', ref: input.version },
       schema: { path: 'verjson-ci.schema.json', version: 1 }, mirror: { terraform: 'terraform/gitlab-mirror', sync: 'tools/mirror/sync.mjs' },
       compliance: { path: 'packages/compliance/packs', packs: FRAMEWORK_PACKS },
+      licensing: { path: 'release/artifact-licenses.json', distributionLicense: licenseInventory.distributionLicense, digest: LICENSE_INVENTORY_DIGEST },
     }, receipts, endpoints: Object.fromEntries(REQUIRED_ENDPOINT_IDS.map((id) => [id, input.endpointDigests?.[id]])),
   };
   validateManifest(manifest);
@@ -48,7 +52,7 @@ export function validateManifest(manifest) {
   exact(manifest, ['schemaVersion', 'version', 'commit', 'state', 'artifacts', 'receipts', 'endpoints', ...(manifest?.state === 'quarantined' ? ['quarantineReason'] : [])], 'manifest');
   if (![1, 2].includes(manifest.schemaVersion) || !SEMVER.test(manifest.version) || !SHA.test(manifest.commit) || !STATES.has(manifest.state)) throw new Error('invalid release manifest identity');
   if (manifest.state === 'quarantined' ? !manifest.quarantineReason : 'quarantineReason' in manifest) throw new Error('invalid quarantine state');
-  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror', ...(manifest.schemaVersion === 2 ? ['compliance'] : [])], 'artifacts');
+  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror', ...(manifest.schemaVersion === 2 ? ['compliance', 'licensing'] : [])], 'artifacts');
   const { cli, oci } = manifest.artifacts;
   exact(cli, ['version', 'path', 'sha256'], 'CLI artifact');
   if (cli.version !== manifest.version || !cli.path || !HEX.test(cli.sha256)) throw new Error('CLI version or integrity differs from release');
@@ -57,6 +61,8 @@ export function validateManifest(manifest) {
   if (manifest.schemaVersion === 2) {
     exact(manifest.artifacts.compliance, ['path', 'packs'], 'compliance artifact');
     if (manifest.artifacts.compliance.path !== 'packages/compliance/packs' || canonicalBytes(manifest.artifacts.compliance.packs) !== canonicalBytes(FRAMEWORK_PACKS)) throw new Error('compliance pack catalog differs from release');
+    exact(manifest.artifacts.licensing, ['path', 'distributionLicense', 'digest'], 'licensing artifact');
+    if (manifest.artifacts.licensing.path !== 'release/artifact-licenses.json' || manifest.artifacts.licensing.distributionLicense !== licenseInventory.distributionLicense || manifest.artifacts.licensing.digest !== LICENSE_INVENTORY_DIGEST) throw new Error('license inventory differs from release');
   }
   exact(manifest.receipts, ['github', 'gitlab'], 'receipts');
   exact(manifest.endpoints, REQUIRED_ENDPOINT_IDS, 'endpoints');

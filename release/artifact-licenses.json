@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "distributionLicense": "Apache-2.0",
+  "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  "packages": {
+    "cli": "Apache-2.0",
+    "compliance": "Apache-2.0",
+    "coordinator": "Apache-2.0",
+    "engine": "Apache-2.0",
+    "release": "Apache-2.0",
+    "result-contract": "Apache-2.0",
+    "schema": "Apache-2.0",
+    "shadscan": "Apache-2.0"
+  },
+  "targets": {
+    "cli": [
+      "cli",
+      "compliance",
+      "engine",
+      "result-contract",
+      "schema",
+      "shadscan"
+    ],
+    "oci": [
+      "cli",
+      "compliance",
+      "coordinator",
+      "engine",
+      "release",
+      "result-contract",
+      "schema",
+      "shadscan"
+    ]
+  }
+}

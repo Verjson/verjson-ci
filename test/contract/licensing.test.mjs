@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { access, readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
+const SUPPORTED_SPDX_EXPRESSIONS = new Set(['Apache-2.0']);
+
 test('the current reusable workspace declares Apache-2.0 consistently', async () => {
   const license = await readFile('LICENSE', 'utf8');
   const rootManifest = JSON.parse(await readFile('package.json', 'utf8'));
@@ -12,8 +14,7 @@ test('the current reusable workspace declares Apache-2.0 consistently', async ()
   for (const directory of packageDirectories.filter((entry) => entry.isDirectory())) {
     const manifestPath = `packages/${directory.name}/package.json`;
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    assert.equal(typeof manifest.license, 'string', manifestPath);
-    assert.notEqual(manifest.license.trim(), '', manifestPath);
+    assert.ok(SUPPORTED_SPDX_EXPRESSIONS.has(manifest.license), `${manifestPath} must use a reviewed SPDX expression`);
     if (manifest.license !== 'Apache-2.0') {
       await access(`packages/${directory.name}/LICENSE`);
     }
@@ -28,6 +29,6 @@ test('the mixed-license boundary requires an explicit license before paid code l
   assert.match(policy, /dedicated workspace package subtree/);
   assert.match(policy, /its own `LICENSE`/);
   assert.match(policy, /SPDX license metadata/);
-  assert.match(policy, /does not currently contain\s+such a package/);
+  assert.match(policy, /does not currently\s+contain such a package/);
   assert.doesNotMatch(`${orchestrator}\n${publicRelease}`, /assertPublishable|issue #4/);
 });
