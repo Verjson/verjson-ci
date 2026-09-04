@@ -66,6 +66,15 @@
                       "additionalProperties": false,
                       "required": ["id", "version"],
                       "properties": {
+                        "id": { "const": "csa-star-l1-caiq" },
+                        "version": { "const": "4.0.13" }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["id", "version"],
+                      "properties": {
                         "id": { "const": "verjson-ci-foundation" },
                         "version": { "const": "1.0.0" }
                       }

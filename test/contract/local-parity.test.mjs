@@ -38,6 +38,16 @@ test('missing-evidence fault injection is confined to checked-in local parity ad
   }
 });
 
+test('local parity matrix includes CAIQ success, required failure, and malformed boundaries', async () => {
+  const local = await readFile('dev/parity-local.mjs', 'utf8');
+  const gitlab = await readFile('dev/gitlab/run-local', 'utf8');
+
+  for (const scenario of ['compliance-caiq-success', 'compliance-caiq-required-failure', 'compliance-caiq-malformed']) {
+    assert.match(local, new RegExp(scenario));
+    assert.match(gitlab, new RegExp(scenario));
+  }
+});
+
 test('two absent evidence artifacts are not parity without both designated failure verdicts', () => {
   assert.throws(() => verifyMissingEvidenceBoundary({
     githubExit: '1\n',

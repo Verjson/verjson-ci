@@ -6,7 +6,7 @@ local_image="${2:?local image required}"
 IFS=',' read -r -a scenarios <<<"$scenario_list"
 for scenario in "${scenarios[@]}"; do
   case "$scenario" in
-    success|failure|compliance-success|compliance-required-failure|compliance-missing-evidence|compliance-malformed-pack|compliance-missing-pack) ;;
+    success|failure|compliance-success|compliance-required-failure|compliance-missing-evidence|compliance-malformed-pack|compliance-missing-pack|compliance-caiq-success|compliance-caiq-required-failure|compliance-caiq-malformed) ;;
     *) echo "unsupported local parity scenario: $scenario" >&2; exit 2 ;;
   esac
 done
@@ -111,7 +111,7 @@ run_scenario() {
     sleep 2
   done
   local expected=success
-  [[ "$scenario" != success && "$scenario" != compliance-success ]] && expected=failed
+  [[ "$scenario" != success && "$scenario" != compliance-success && "$scenario" != compliance-caiq-success ]] && expected=failed
   if [ "$status" != "$expected" ]; then
     echo "GitLab local $scenario result=$status expected=$expected" >&2
     while IFS=$'\t' read -r job_id job_name job_status; do
@@ -129,12 +129,12 @@ run_scenario() {
   curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
     "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/boundary-exit-code" \
     --output "$root/.verjson-ci/local/$scenario-gitlab-exit-code"
-  if [[ "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack ]]; then
+  if [[ "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack && "$scenario" != compliance-caiq-malformed ]]; then
     curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
       "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
       --output "$root/.verjson-ci/local/$scenario-gitlab.json"
   fi
-  if [[ "$scenario" = compliance-* && "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack && "$scenario" != compliance-missing-evidence ]]; then
+  if [[ "$scenario" = compliance-* && "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack && "$scenario" != compliance-missing-evidence && "$scenario" != compliance-caiq-malformed ]]; then
     curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
       "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/compliance-evidence.json" \
       --output "$root/.verjson-ci/local/$scenario-gitlab-compliance.json"

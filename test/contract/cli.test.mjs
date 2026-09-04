@@ -46,3 +46,20 @@ test('CLI writes deterministic compliance evidence beside the result', async () 
   const evidence = await readFile(join(directory, 'compliance-evidence.json'), 'utf8');
   assert.equal(result.capabilities.compliance.artifactDigest, `sha256:${createHash('sha256').update(evidence).digest('hex')}`);
 });
+
+test('CLI projects every CAIQ item into its result and evidence artifact', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'verjson-ci-cli-caiq-'));
+  const output = join(directory, 'result.json');
+  const fixture = resolve('test/fixtures/compliance-caiq-success');
+
+  await execFileAsync(process.execPath, [cli, 'run', '--config', join(fixture, 'verjson-ci.yml'), '--output', output, '--cwd', fixture]);
+
+  const result = JSON.parse(await readFile(output, 'utf8'));
+  const evidence = JSON.parse(await readFile(join(directory, 'compliance-evidence.json'), 'utf8'));
+  assert.equal(result.capabilities.compliance.items.length, 261);
+  assert.equal(new Set(result.capabilities.compliance.items.map(({ id }) => id)).size, 261);
+  assert.equal(result.capabilities.compliance.frameworks[0].itemCoverage.total, 261);
+  assert.equal(evidence.schema, 2);
+  assert.equal(evidence.frameworks[0].items.length, 261);
+  assert.equal(new Set(evidence.frameworks[0].items.map(({ id }) => id)).size, 261);
+});

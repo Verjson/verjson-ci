@@ -53,7 +53,7 @@ test('produces deterministic evidence without command text or file contents', as
   assert.deepEqual(first.result.controls.map(({ status }) => status), ['satisfied', 'satisfied', 'satisfied']);
 });
 
-test('required mode fails closed only for blocking unsatisfied controls', async () => {
+test('required mode fails closed for blocking controls without affirmative evidence', async () => {
   const evaluated = await evaluateCompliance(
     { frameworks: [{ id: 'verjson-ci-foundation', version: '1.0.0' }], mode: 'required' },
     { ...successfulChecks, commands: [{ name: 'test', command: 'false', exitCode: 1, signal: null, outcome: 'failure' }] },
