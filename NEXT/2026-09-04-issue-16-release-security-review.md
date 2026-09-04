@@ -21,3 +21,4 @@ title: Harden unified release recovery and identity boundaries
 - Suppress GitHub artifact upload only under the local `act` harness so the reusable workflow can complete without GitHub's artifact service.
 - Pass the provider-neutral conformance scenario through both GitHub adapter surfaces so their independently observed consumption results are identical.
 - Route the disposable GitHub consumption proof through canonical portable runner lanes while retaining a GitHub-hosted fallback for external adopters.
+- Route public CLI, OCI, forge tag/component, mirror, and consumption endpoints through the same closed plan using create-only GitHub release checkpoint generations, keyless ledger bundles, and rerun-safe quarantine reconciliation.

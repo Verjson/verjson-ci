@@ -105,15 +105,16 @@ jobs:
           path: .release-proof/
           if-no-files-found: error
 
-  publish-github:
+  publish-public:
     if: ${{ inputs.public }}
     needs: [validate, release]
-    environment: verjson-ci-public-github
+    environment: verjson-ci-public-release
     permissions:
       contents: write
       packages: write
       id-token: write
     runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -125,63 +126,82 @@ jobs:
             echo '::error::Issue #4 must select a license before public publication.'
             exit 1
           }
+      - name: Revalidate trusted public release code
+        env:
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.19.0
+      - uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb
+        with:
+          cosign-release: v2.4.3
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: Build versioned public artifacts
-        env:
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-        run: node tools/release/package-cli.mjs "$RELEASE_VERSION" dist/release > dist/release-cli.json
-      - name: Publish create-only OCI image
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      - name: Install pinned local GitHub Actions runner for public consumption
         run: |
-          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker buildx build --file container/Dockerfile --tag "ghcr.io/${GITHUB_REPOSITORY,,}:$RELEASE_VERSION" --push .
-      - name: Create immutable tag and GitHub release
+          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/act.tgz" https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz
+          echo '0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0  '"$RUNNER_TEMP/act.tgz" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/act.tgz" --directory "$RUNNER_TEMP"
+          echo "ACT_BIN=$RUNNER_TEMP/act" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-proof-${{ needs.validate.outputs.version }}
+          path: .release-proof
+      - name: Create immutable release-state checkpoint namespace
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_VERSION" >/tmp/tag.json 2>/dev/null; then
-            test "$(jq -r .object.sha /tmp/tag.json)" = "$RELEASE_COMMIT"
+          checkpoint="verjson-state-$RELEASE_VERSION"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$checkpoint" --jq .object.sha > "$RUNNER_TEMP/checkpoint-sha" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/checkpoint-sha")" = "$RELEASE_COMMIT"
+            gh release view "$checkpoint" >/dev/null
           else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_VERSION" -f "sha=$RELEASE_COMMIT"
+            gh release create "$checkpoint" --draft --target "$RELEASE_COMMIT" --title "$checkpoint"
           fi
-          gh release view "$RELEASE_VERSION" >/dev/null 2>&1 || gh release create "$RELEASE_VERSION" dist/release/*.tgz --target "$RELEASE_COMMIT" --verify-tag --generate-notes
-
-  publish-gitlab:
-    if: ${{ inputs.public }}
-    needs: [validate, release, publish-github]
-    environment: verjson-ci-public-gitlab
-    permissions:
-      contents: read
-    runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: refs/heads/main
-          persist-credentials: false
-      - name: Hold GitLab promotion at the same legal boundary
-        run: |
-          test -f LICENSE || {
-            echo '::error::Issue #4 must select a license before public mirroring.'
-            exit 1
-          }
-      - name: Synchronize immutable SemVer tag to GitLab
+      - name: Prepare closed public endpoint plan
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          node tools/release/prepare-public-input.mjs .release-proof/manifest.json .release-proof/manifest.sigstore.json .release-public-input.json "$GITHUB_REPOSITORY" "$RELEASE_VERSION" "$RELEASE_COMMIT"
+      - name: Exchange GitHub OIDC for short-lived GitLab mirror credential
+        env:
+          GITLAB_OIDC_BROKER: ${{ vars.VERJSON_CI_GITLAB_OIDC_BROKER }}
+        run: |
+          [[ "$GITLAB_OIDC_BROKER" =~ ^https://[^/]+/ ]]
+          token_response="$(curl --fail --silent --show-error --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=verjson-ci-gitlab-release")"
+          job_token="$(jq -er .value <<<"$token_response")"
+          exchange="$(curl --fail --silent --show-error --request POST --header 'Content-Type: application/json' --data "$(jq -cn --arg token "$job_token" '{token:$token}')" "$GITLAB_OIDC_BROKER")"
+          gitlab_token="$(jq -er 'select(.expires_in > 0 and .expires_in <= 3600) | .token' <<<"$exchange")"
+          echo "::add-mask::$gitlab_token"
+          helper="$RUNNER_TEMP/gitlab-askpass"
+          printf '#!/bin/sh\nprintf "%%s\\n" "$%s"\n' GITLAB_TOKEN > "$helper"
+          chmod 700 "$helper"
+          {
+            echo "GITLAB_TOKEN=$gitlab_token"
+            echo "GIT_ASKPASS=$helper"
+            echo 'GIT_TERMINAL_PROMPT=0'
+          } >> "$GITHUB_ENV"
+      - name: Reconcile every public endpoint through durable state machine
+        env:
+          GH_TOKEN: ${{ github.token }}
           GITLAB_MIRROR_URL: ${{ vars.VERJSON_CI_GITLAB_MIRROR_URL }}
-          GITLAB_TOKEN: ${{ secrets.VERJSON_CI_GITLAB_MIRROR_TOKEN }}
+          VERJSON_RELEASE_CLI_PATH: .release-proof/disposable-endpoints/cli
         run: |
           test -n "$GITLAB_MIRROR_URL"
-          test -n "$GITLAB_TOKEN"
-          helper="$RUNNER_TEMP/gitlab-askpass"
-          printf "#!/bin/sh\nprintf '%%s\\n' \"\$GITLAB_TOKEN\"\n" > "$helper"
-          chmod 700 "$helper"
-          GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0 node tools/mirror/sync.mjs --source "https://github.com/$GITHUB_REPOSITORY.git" --destination "$GITLAB_MIRROR_URL"
-          GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --tags "$GITLAB_MIRROR_URL" "refs/tags/$RELEASE_VERSION"
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          VERJSON_RELEASE_IMAGE_DIGEST="$(jq -er .artifacts.oci.digest .release-proof/manifest.json)"
+          VERJSON_RELEASE_REQUEST_ID="$(jq -er .receipts.github.requestId .release-proof/manifest.json)"
+          export VERJSON_RELEASE_IMAGE_DIGEST VERJSON_RELEASE_REQUEST_ID
+          node tools/release/public-release.mjs .release-public-input.json .release-public
+      - name: Sign and verify final complete public manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          node tools/release/finalize-public.mjs "$RELEASE_VERSION" .release-public/manifest.complete.json "$GITHUB_REPOSITORY"

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FileReleaseStore } from '../src/file-store.mjs';
+import { DurableReleaseStore } from '../src/durable-store.mjs';
 import { ReleaseConflictError, ReleaseOrchestrator, ReleaseQuarantinedError } from '../src/index.mjs';
 import { canonicalBytes, objectDigest, REQUIRED_ENDPOINT_IDS } from '../../../tools/release/manifest.mjs';
 
@@ -26,8 +27,7 @@ function trustedSigner() {
   const digest = (record) => createHash('sha256').update(canonicalBytes(record)).digest('hex');
   return { identity: signerIdentity, signRecord: async (record) => digest(record), verifyRecord: async (record) => { const { signature, ...unsigned } = record; if (signature !== digest(unsigned)) throw new Error('invalid signed ledger record'); } };
 }
-function harness({ store = memoryStore(), endpoints, create } = {}) {
-  const published = new Map();
+function harness({ store = memoryStore(), endpoints, create, published = new Map() } = {}) {
   const endpointList = endpoints ?? REQUIRED_ENDPOINT_IDS.map((id) => ({ id, digest: endpointDigests[id] }));
   const orchestrator = new ReleaseOrchestrator({
     license: { assertPublishable: async () => { throw new Error('dry run must not require a license'); } }, store,
@@ -39,6 +39,22 @@ function harness({ store = memoryStore(), endpoints, create } = {}) {
   });
   return { orchestrator, store, published };
 }
+
+test('public rerun resumes after GitLab failure without overwriting GitHub endpoints', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'release-public-rerun-')); const snapshots = []; const published = new Map(); const creates = [];
+  const remote = { load: async () => snapshots.at(-1), create: async (expected, files) => { if (snapshots.length !== expected) throw new Error('CAS conflict'); snapshots.push({ generation: expected + 1, files: structuredClone(files) }); return expected + 1; } };
+  let failGitLab = true;
+  const create = async (endpoint, state) => { if (state.has(endpoint.id)) throw new Error('overwrite'); creates.push(endpoint.id); state.set(endpoint.id, endpoint.digest); if (endpoint.id === 'gitlab-component' && failGitLab) { failGitLab = false; throw Object.assign(new Error('GitLab unavailable'), { retryable: true, code: 'network', phase: endpoint.id }); } };
+  try {
+    const first = harness({ store: new DurableReleaseStore(path.join(directory, 'runner-1'), { remote }), create, published });
+    await assert.rejects(() => first.orchestrator.release(candidate), ReleaseQuarantinedError);
+    const githubCreates = [...creates];
+    const second = harness({ store: new DurableReleaseStore(path.join(directory, 'runner-2'), { remote }), create, published });
+    assert.equal((await second.orchestrator.release(candidate)).state, 'complete');
+    assert.deepEqual(creates.slice(0, githubCreates.length), githubCreates);
+    assert.equal(new Set(creates).size, creates.length);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test('dry run signs verified receipts and completes an append-only endpoint ledger', async () => {
   const { orchestrator, store } = harness();
@@ -65,7 +81,7 @@ test('restart after one publication creates only the missing endpoint', async ()
     const store = new FileReleaseStore(path.join(directory, 'ledger'), { checkpointRoot: path.join(directory, 'anchors') }); let crash = true; const created = [];
     const setup = harness({ store, create: async (endpoint, published) => { created.push(endpoint.id); published.set(endpoint.id, endpoint.digest); if (endpoint.id === 'gitlab-component' && crash) { crash = false; throw Object.assign(new Error('interrupted'), { code: 'network', retryable: true, phase: endpoint.id }); } } });
     await assert.rejects(() => setup.orchestrator.release(candidate), ReleaseQuarantinedError);
-    assert.deepEqual(created, REQUIRED_ENDPOINT_IDS.slice(0, 4));
+    assert.deepEqual(created, REQUIRED_ENDPOINT_IDS.slice(0, REQUIRED_ENDPOINT_IDS.indexOf('gitlab-component') + 1));
     await setup.orchestrator.release(candidate);
     assert.deepEqual(created, REQUIRED_ENDPOINT_IDS);
     const history = await store.reserve(candidate.version, commit, signerIdentity);
