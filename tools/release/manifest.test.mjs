@@ -16,7 +16,10 @@ test('enforces endpoint completion and state-conditional quarantine fields', () 
 test('binds the exact compliance pack catalog into the signed manifest', () => {
   const manifest = buildManifest(input);
   assert.equal(manifest.artifacts.compliance.path, 'packages/compliance/packs');
-  assert.deepEqual(manifest.artifacts.compliance.packs.map(({ id, version }) => ({ id, version })), [{ id: 'verjson-ci-foundation', version: '1.0.0' }]);
+  assert.deepEqual(manifest.artifacts.compliance.packs.map(({ id, version }) => ({ id, version })), [
+    { id: 'csa-star-l1-caiq', version: '4.0.13' },
+    { id: 'verjson-ci-foundation', version: '1.0.0' },
+  ]);
   const tampered = structuredClone(manifest); tampered.artifacts.compliance.packs[0].digest = `sha256:${'0'.repeat(64)}`;
   assert.throws(() => validateManifest(tampered), /catalog differs/);
 });

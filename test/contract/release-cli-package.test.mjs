@@ -21,7 +21,7 @@ test('standalone CLI archive embeds and reports the unified release version', as
 
     await execFileAsync('npm', ['install', '--prefix', install, metadata.path]);
     const output = join(directory, 'result.json');
-    const fixture = resolve('test/fixtures/compliance-success');
+    const fixture = resolve('test/fixtures/compliance-caiq-success');
     await execFileAsync(join(install, 'node_modules/.bin/verjson-ci'), [
       'run', '--config', join(fixture, 'verjson-ci.yml'), '--output', output, '--cwd', fixture,
     ]);
@@ -30,6 +30,9 @@ test('standalone CLI archive embeds and reports the unified release version', as
       engine: '1.2.3', adapter: '1.2.3', outcome: 'success',
     });
     assert.match(result.capabilities.compliance.artifactDigest, /^sha256:/);
+    assert.deepEqual(result.capabilities.compliance.frameworks.map(({ id, version }) => ({ id, version })), [
+      { id: 'csa-star-l1-caiq', version: '4.0.13' },
+    ]);
     assert.equal(typeof await readFile(join(directory, 'compliance-evidence.json'), 'utf8'), 'string');
   } finally {
     await rm(directory, { recursive: true, force: true });

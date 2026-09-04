@@ -1,0 +1,13 @@
+schema: 1
+stack: node
+runtime:
+  node: '24'
+  package-manager: pnpm
+commands:
+  test: 'true'
+checks:
+  compliance:
+    frameworks:
+      - id: csa-star-l1-caiq
+        version: 4.0.13
+    mode: report

@@ -32,7 +32,7 @@ for (const scenario of scenarios) {
     `scenario=${scenario}`,
     '--env',
     `VERJSON_CI_LOCAL_IMAGE=${image}`,
-    ], ['success', 'compliance-success'].includes(scenario) ? 0 : 1);
+    ], ['success', 'compliance-success', 'compliance-caiq-success'].includes(scenario) ? 0 : 1);
 }
 run(resolve(root, 'dev/gitlab/run-local'), [scenarios.join(','), image]);
 for (const scenario of scenarios) await compareScenario(scenario);
@@ -55,7 +55,7 @@ function parseArgs(args) {
 }
 
 function selectScenarios({ changed, scenario }) {
-  const all = ['success', 'failure', 'compliance-success', 'compliance-required-failure', 'compliance-missing-evidence', 'compliance-malformed-pack', 'compliance-missing-pack'];
+  const all = ['success', 'failure', 'compliance-success', 'compliance-required-failure', 'compliance-missing-evidence', 'compliance-malformed-pack', 'compliance-missing-pack', 'compliance-caiq-success', 'compliance-caiq-required-failure', 'compliance-caiq-malformed'];
   if (scenario === 'all') return all;
   const supported = new Set(all);
   if (scenario) {
@@ -112,7 +112,7 @@ async function compareScenario(scenario) {
   const githubExit = await readFile(resolve(directory, `${scenario}-github-exit-code`), 'utf8');
   const gitlabExit = await readFile(resolve(directory, `${scenario}-gitlab-exit-code`), 'utf8');
   if (githubExit !== gitlabExit) throw new Error(`adapter exit mismatch for scenario ${scenario}`);
-  if (['compliance-malformed-pack', 'compliance-missing-pack'].includes(scenario)) {
+  if (['compliance-malformed-pack', 'compliance-missing-pack', 'compliance-caiq-malformed'].includes(scenario)) {
     if (githubExit.trim() !== '2' || existsSync(resolve(directory, `${scenario}-github.json`)) || existsSync(resolve(directory, `${scenario}-gitlab.json`))) throw new Error(`compliance boundary did not fail closed for scenario ${scenario}`);
     return;
   }

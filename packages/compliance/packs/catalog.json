@@ -2,6 +2,12 @@
   "schema": 1,
   "packs": [
     {
+      "id": "csa-star-l1-caiq",
+      "version": "4.0.13",
+      "path": "csa-star-l1-caiq/4.0.13.json",
+      "digest": "sha256:97d7fbaf12d4fba829abcea00baba24bf460a96a4e791db7f3e3c4bdab1591af"
+    },
+    {
       "id": "verjson-ci-foundation",
       "version": "1.0.0",
       "path": "verjson-ci-foundation/1.0.0.json",

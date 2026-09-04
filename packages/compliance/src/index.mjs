@@ -66,7 +66,7 @@ export async function evaluateCompliance(configuration, observations, options = 
   const artifactDigest = sha256(artifactBytes);
   const controls = frameworks.flatMap((framework) => framework.controls.map((control) => ({
     framework: framework.id, frameworkVersion: framework.version, id: control.id, blocking: control.blocking,
-    status: control.status, evidenceDigest: control.evidenceDigest,
+    status: control.status, evidenceDigest: control.evidenceDigest, evidence: control.evidence,
   })));
   const satisfiedPercent = controls.length === 0 ? 0 : Math.floor((controls.filter(({ status }) => status === 'satisfied').length * 100) / controls.length);
   const blockingFailure = controls.some(({ blocking, status }) => blocking && status === 'unsatisfied');
@@ -119,14 +119,37 @@ function coverage(controls) {
 }
 
 function validatePack(pack, reference) {
-  exact(pack, ['schema', 'id', 'version', 'controls'], 'pack');
+  const hasQuestionCatalog = pack?.provenance !== undefined || pack?.questions !== undefined;
+  exact(pack, hasQuestionCatalog ? ['schema', 'id', 'version', 'provenance', 'controls', 'questions'] : ['schema', 'id', 'version', 'controls'], 'pack');
   if (pack.schema !== 1 || pack.id !== reference.id || pack.version !== reference.version || !Array.isArray(pack.controls) || pack.controls.length === 0 || pack.controls.length > 2048) throw new CompliancePackError('compliance framework pack identity malformed');
   const ids = new Set();
   for (const control of pack.controls) {
     exact(control, ['id', 'blocking', 'evidence'], 'control');
-    if (!/^[A-Z][A-Z0-9-]{1,63}$/.test(control.id) || ids.has(control.id) || typeof control.blocking !== 'boolean') throw new CompliancePackError('compliance framework control malformed');
+    if (!/^[A-Z][A-Z0-9&-]{1,63}$/.test(control.id) || ids.has(control.id) || typeof control.blocking !== 'boolean') throw new CompliancePackError('compliance framework control malformed');
     ids.add(control.id);
     validateMapping(control.evidence);
+  }
+  if (hasQuestionCatalog) validateQuestionCatalog(pack.provenance, pack.questions, ids);
+}
+
+function validateQuestionCatalog(provenance, questions, controlIds) {
+  exact(provenance, ['owner', 'controlCatalogLicense', 'licenseUrl', 'controlCatalogUrl', 'controlCatalogSha256', 'caiqUrl', 'caiqQuestionIdsRetrievedFrom', 'caiqQuestionIdsSha256'], 'pack provenance');
+  const urls = [provenance.licenseUrl, provenance.controlCatalogUrl, provenance.caiqUrl, provenance.caiqQuestionIdsRetrievedFrom];
+  if (typeof provenance.owner !== 'string' || provenance.owner.length < 1 || provenance.owner.length > 128
+    || !/^[A-Za-z0-9.-]{1,64}$/.test(provenance.controlCatalogLicense)
+    || !urls.every((value) => URL.canParse(value) && new URL(value).protocol === 'https:')
+    || !/^[0-9a-f]{64}$/.test(provenance.controlCatalogSha256) || !/^[0-9a-f]{64}$/.test(provenance.caiqQuestionIdsSha256)) {
+    throw new CompliancePackError('compliance framework pack provenance malformed');
+  }
+  if (!Array.isArray(questions) || questions.length === 0 || questions.length > 4096) throw new CompliancePackError('compliance framework question catalog malformed');
+  const ids = new Set();
+  for (const question of questions) {
+    exact(question, ['id', 'controlId'], 'question');
+    if (!/^[A-Z][A-Z0-9&-]{1,15}-\d{2}\.\d{1,3}$/.test(question.id) || ids.has(question.id)
+      || !controlIds.has(question.controlId) || !question.id.startsWith(`${question.controlId}.`)) {
+      throw new CompliancePackError('compliance framework question malformed');
+    }
+    ids.add(question.id);
   }
 }
 
