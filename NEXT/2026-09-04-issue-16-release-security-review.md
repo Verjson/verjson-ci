@@ -23,3 +23,4 @@ title: Harden unified release recovery and identity boundaries
 - Route the disposable GitHub consumption proof through canonical portable runner lanes while retaining a GitHub-hosted fallback for external adopters.
 - Route public CLI, OCI, forge tag/component, mirror, and consumption endpoints through the same closed plan using create-only GitHub release checkpoint generations, keyless ledger bundles, and rerun-safe quarantine reconciliation.
 - Anchor every remote checkpoint generation to a separately protected immutable annotated tag and reject suffix deletion, anchor deletion, binding mismatch, gaps, and generation races on restore.
+- Recover only signed next-generation dual-write interruptions through deterministic create-only anchor/marker reconciliation, fence stale writers, and retain live effective-ruleset evidence before public mutation.

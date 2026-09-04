@@ -132,14 +132,18 @@ jobs:
         run: |
           test "$GITHUB_REF" = refs/heads/main
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
-      - name: Require immutable release-state anchor protection
+      - name: Read back effective immutable anchor protection
         env:
-          RELEASE_ANCHORS_PROTECTED: ${{ vars.VERJSON_CI_RELEASE_ANCHORS_PROTECTED }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          test "$RELEASE_ANCHORS_PROTECTED" = true || {
-            echo '::error::Protect verjson-release-state-anchor-verjson-state-* tags from update and deletion before public release.'
-            exit 1
-          }
+          mkdir .release-control
+          node tools/release/verify-anchor-ruleset.mjs "$GITHUB_REPOSITORY" .release-control/anchor-ruleset-receipt.json
+      - name: Retain anchor control-plane receipt before mutation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-anchor-controls-${{ needs.validate.outputs.version }}-${{ github.run_attempt }}
+          path: .release-control/anchor-ruleset-receipt.json
+          if-no-files-found: error
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.19.0

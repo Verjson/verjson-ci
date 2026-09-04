@@ -16,6 +16,7 @@ function fakeGh() {
       if (args[1] === 'upload') { const file = args[3]; const name = path.basename(file); if (assets.has(name)) throw new Error('asset exists'); assets.set(name, await readFile(file)); uploadCount += 1; return ''; }
       if (args[1] === 'download') { const name = args[args.indexOf('--pattern') + 1]; const directory = args[args.indexOf('--dir') + 1]; if (!assets.has(name)) throw new Error('not found'); await writeFile(path.join(directory, name), assets.get(name)); return ''; }
       if (args[0] === 'api' && args.some((item) => item.includes('matching-refs'))) return JSON.stringify([...anchors].map(([name, sha]) => ({ ref: `refs/tags/${name}`, object: { sha } })));
+      if (args[0] === 'api' && args[1]?.includes('/git/ref/tags/')) { const name = args[1].split('/git/ref/tags/')[1]; if (!anchors.has(name)) throw new Error('not found'); return JSON.stringify({ ref: `refs/tags/${name}`, object: { sha: anchors.get(name) } }); }
       if (args[0] === 'api' && args[1]?.includes('/git/tags/')) return JSON.stringify(tagObjects.get(args[1].split('/').at(-1)));
       if (args[0] === 'api' && args.some((item) => item.endsWith('/git/tags'))) {
         const field = (name) => args.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -28,13 +29,14 @@ function fakeGh() {
   };
 }
 
-function remote(fake) { return githubAssetRemote({ repository: 'Verjson/verjson-ci', version: '1.2.3', commit, run: fake.run }); }
+const signer = { signRecord: async (record) => `signed:${record.digest}`, verifyRecord: async (record) => { if (record.signature !== `signed:${record.digest}`) throw new Error('signature invalid'); } };
+function remote(fake, crashHook) { return githubAssetRemote({ repository: 'Verjson/verjson-ci', version: '1.2.3', commit, signer, run: fake.run, crashHook }); }
 
 test('stores immutable hash-chained checkpoint assets and separate annotated anchors with CAS', async () => {
   const fake = fakeGh(); const store = remote(fake);
   assert.equal(await store.load(), undefined); assert.equal(await store.create(0, { 'ledger/a': 'YQ==' }), 1);
   const loaded = await store.load(); assert.equal(loaded.generation, 1); assert.deepEqual(loaded.files, { 'ledger/a': 'YQ==' }); assert.match(loaded.digest, /^sha256:/);
-  await assert.rejects(() => store.create(0, {}), /CAS conflict/); assert.equal(fake.uploadCount, 1);
+  await assert.rejects(() => store.create(0, {}), /CAS conflict/); assert.equal(fake.uploadCount, 2);
 });
 
 test('rejects deletion of newest asset while its monotonic anchor remains', async () => {
@@ -55,5 +57,28 @@ test('rejects deleted and mismatched immutable anchors', async () => {
 test('rejects interior generation gaps on both remote histories', async () => {
   const fake = fakeGh(); const store = remote(fake); await store.create(0, { a: 'YQ==' }); await store.create(1, { b: 'Yg==' });
   fake.assets.delete('verjson-release-state-1.2.3-00000001.json'); fake.anchors.delete('verjson-release-state-anchor-1.2.3-00000001');
-  await assert.rejects(() => store.load(), /generation gap/);
+  await assert.rejects(() => store.load(), /generation gap|disagree/);
+});
+
+test('recovers exact signed next generation after crashes at each dual-write boundary', async () => {
+  for (const boundary of ['after-asset', 'after-tag-object', 'after-ref']) {
+    const fake = fakeGh(); let crashed = false;
+    const crashing = remote(fake, async (point) => { if (!crashed && point === boundary) { crashed = true; throw new Error(`crash ${point}`); } });
+    await assert.rejects(() => crashing.create(0, { a: 'YQ==' }), new RegExp(`crash ${boundary}`));
+    const recovered = await remote(fake).load(); assert.equal(recovered.generation, 1); assert.deepEqual(recovered.files, { a: 'YQ==' });
+    assert.equal(fake.anchors.size, 1); assert.equal([...fake.assets].filter(([name]) => name.includes('committed')).length, 1);
+  }
+});
+
+test('fences stale writers after a recovered partial generation', async () => {
+  const fake = fakeGh(); let crashed = false; const stale = remote(fake, async (point) => { if (!crashed && point === 'after-asset') { crashed = true; throw new Error('crash'); } });
+  await assert.rejects(() => stale.create(0, { a: 'YQ==' }), /crash/); await remote(fake).load();
+  await assert.rejects(() => stale.create(0, { stale: 'eA==' }), /CAS conflict/);
+});
+
+test('refuses to anchor a tampered recoverable asset', async () => {
+  const fake = fakeGh(); let crashed = false; const crashing = remote(fake, async (point) => { if (!crashed && point === 'after-asset') { crashed = true; throw new Error('crash'); } });
+  await assert.rejects(() => crashing.create(0, { a: 'YQ==' }), /crash/);
+  const name = 'verjson-release-state-1.2.3-00000001.json'; const snapshot = JSON.parse(fake.assets.get(name)); snapshot.signature = 'forged'; fake.assets.set(name, Buffer.from(JSON.stringify(snapshot)));
+  await assert.rejects(() => remote(fake).load(), /signature invalid/); assert.equal(fake.anchors.size, 0);
 });
