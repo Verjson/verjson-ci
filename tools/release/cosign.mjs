@@ -18,8 +18,12 @@ export const RECEIPT_POLICIES = Object.freeze({
   gitlab: { issuer: 'https://gitlab.com', identity: 'project_path:Verjson/verjson-ci:ref_type:branch:ref:main' },
 });
 
-export async function signManifest({ manifest, bundle }, run = runCosign) { await validateManifestFile(manifest); await run(['sign-blob', '--yes', '--bundle', bundle, manifest]); return bundle; }
-export async function verifyManifest({ manifest, bundle }, run = runCosign) { await validateManifestFile(manifest); await verifyBlob(manifest, bundle, RELEASE_SIGNING_POLICY, run); }
+export async function signManifest({ manifest, bundle }, run = runCosign) {
+  await withManifestSnapshot(manifest, async (snapshot) => run(['sign-blob', '--yes', '--bundle', bundle, snapshot])); return bundle;
+}
+export async function verifyManifest({ manifest, bundle }, run = runCosign) {
+  await withManifestSnapshot(manifest, async (snapshot) => verifyBlob(snapshot, bundle, RELEASE_SIGNING_POLICY, run));
+}
 
 export async function verifyReceiptEnvelope(forge, envelope, expected, run = runCosign) {
   const policy = RECEIPT_POLICIES[forge];
@@ -42,7 +46,14 @@ export async function verifyReceiptEnvelope(forge, envelope, expected, run = run
 async function verifyBlob(blob, bundle, policy, run) {
   await run(['verify-blob', '--bundle', bundle, '--certificate-identity', policy.identity, '--certificate-oidc-issuer', policy.issuer, blob]);
 }
-async function validateManifestFile(file) { validateManifest(JSON.parse(await readFile(file, 'utf8'))); }
+async function withManifestSnapshot(file, action) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'verjson-ci-manifest-'));
+  try {
+    const bytes = await readFile(file); validateManifest(JSON.parse(bytes));
+    const snapshot = path.join(directory, 'manifest.json'); await writeFile(snapshot, bytes, { flag: 'wx', mode: 0o600 });
+    await action(snapshot);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
 async function runCosign(args) { await execFileAsync(process.env.COSIGN_BIN || 'cosign', args, { env: process.env }); }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

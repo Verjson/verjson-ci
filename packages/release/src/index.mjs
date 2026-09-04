@@ -12,7 +12,11 @@ export class ReleaseOrchestrator {
     let release = await this.store.reserve(candidate.version, candidate.commit, this.signer.identity);
     if (release === 'conflict') throw new ReleaseConflictError('release version already belongs to another commit');
     release = await this.#verifyHistory(release, candidate);
-    if (release.state === 'complete') return release.manifest;
+    if (release.recoveryNeeded) release = await this.store.recover(release);
+    if (release.state === 'complete') {
+      await this.#observeCompleted(release, release.manifest, candidate.dryRun);
+      return release.manifest;
+    }
     if (release.state === 'quarantined' && !release.retryable) throw new ReleaseQuarantinedError('release has a terminal quarantine', release.manifest);
     let staged = release.manifest?.state === 'staged' ? release.manifest : undefined;
     if (release.state === 'quarantined' && release.retryable) {
@@ -95,6 +99,18 @@ export class ReleaseOrchestrator {
       } catch (error) { error.release = release; throw error; }
     }
     return release;
+  }
+
+  async #observeCompleted(release, manifest, dryRun) {
+    const endpoints = await this.publisher.endpoints(manifest, { dryRun });
+    const ids = endpoints.map(({ id }) => id);
+    if (new Set(ids).size !== ids.length || [...ids].sort().join() !== [...REQUIRED_ENDPOINT_IDS].sort().join()) throw new ReleaseConflictError('completed publication plan is incomplete');
+    for (const endpoint of endpoints) {
+      if (endpoint.digest !== manifest.endpoints[endpoint.id]) throw new ReleaseConflictError(`completed manifest digest differs for ${endpoint.id}`);
+      const recorded = release.transitions.find((item) => item.state === 'published' && item.endpoint === endpoint.id);
+      if (!recorded || recorded.digest !== endpoint.digest) throw new ReleaseConflictError(`completed ledger lacks ${endpoint.id}`);
+      if (await this.publisher.readDigest(endpoint) !== endpoint.digest) throw new ReleaseConflictError(`completed endpoint drifted for ${endpoint.id}`);
+    }
   }
 }
 

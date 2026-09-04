@@ -10,7 +10,7 @@ const SHA = /^[0-9a-f]{40}$/;
 const HEX = /^[0-9a-f]{64}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const STATES = new Set(['staged', 'complete', 'quarantined']);
-export const REQUIRED_ENDPOINT_IDS = Object.freeze(['cli', 'oci', 'github-action', 'gitlab-component', 'gitlab-mirror', 'release-tag', 'github-consumption', 'gitlab-consumption']);
+export const REQUIRED_ENDPOINT_IDS = Object.freeze(['cli', 'oci', 'github-action', 'gitlab-component', 'release-tag', 'gitlab-mirror', 'github-consumption', 'gitlab-consumption']);
 const schemaValidator = new Ajv2020({ strict: true, strictRequired: false, formats: { uri: /^https:\/\/[^\s]+$/ } }).compile(schema);
 
 export function canonicalBytes(value) {

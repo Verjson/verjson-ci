@@ -13,3 +13,6 @@ title: Harden unified release recovery and identity boundaries
 - Split unprivileged candidate validation from approved publication and execute privileged code only from the exact protected `main` head without persisted checkout credentials.
 - Exercise a concrete disposable release across the real CLI archive, OCI image, forge adapters, GitLab mirror, immutable tag, and both consumption receipts.
 - Bind a closed required endpoint plan into the manifest, re-observe every endpoint, and hash-chain ledger records to a stable signer and persisted head.
+- Re-observe completed releases, anchor ledger heads in an independent monotonic store, and recover stable signed state across hard process exits at both persistence boundaries.
+- Execute independent GitHub and disposable GitLab CE fixture processes, create and mirror a real immutable Git tag, and snapshot manifest bytes before keyless signing or verification.
+- Remove unused repository/package write permissions from proof execution and isolate future public endpoint permissions behind issue #4 environments.

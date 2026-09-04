@@ -58,9 +58,8 @@ jobs:
     needs: validate
     environment: verjson-ci-release
     permissions:
-      contents: write
+      contents: read
       id-token: write
-      packages: write
     runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
     timeout-minutes: 45
     steps:
@@ -93,18 +92,90 @@ jobs:
         run: node tools/release/cosign.mjs sign .release-proof/manifest.json .release-proof/manifest.sigstore.json
       - name: Verify exact trusted release-workflow identity
         run: node tools/release/cosign.mjs verify .release-proof/manifest.json .release-proof/manifest.sigstore.json
-      - name: Enforce public-release legal gate
-        if: ${{ inputs.public }}
-        run: |
-          test -f LICENSE || {
-            echo '::error::Issue #4 must select a license before the first public release.'
-            exit 1
-          }
-          echo '::error::Public promotion is intentionally held by issue #4; the technical pipeline proof is complete.'
-          exit 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: release-proof-${{ needs.validate.outputs.version }}
           path: .release-proof/
           if-no-files-found: error
+
+  publish-github:
+    if: ${{ inputs.public }}
+    needs: [validate, release]
+    environment: verjson-ci-public-github
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Hold public promotion at the legal boundary
+        run: |
+          test -f LICENSE || {
+            echo '::error::Issue #4 must select a license before public publication.'
+            exit 1
+          }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.19.0
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build versioned public artifacts
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: node tools/release/package-cli.mjs "$RELEASE_VERSION" dist/release > dist/release-cli.json
+      - name: Publish create-only OCI image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --file container/Dockerfile --tag "ghcr.io/${GITHUB_REPOSITORY,,}:$RELEASE_VERSION" --push .
+      - name: Create immutable tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_VERSION" >/tmp/tag.json 2>/dev/null; then
+            test "$(jq -r .object.sha /tmp/tag.json)" = "$RELEASE_COMMIT"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_VERSION" -f "sha=$RELEASE_COMMIT"
+          fi
+          gh release view "$RELEASE_VERSION" >/dev/null 2>&1 || gh release create "$RELEASE_VERSION" dist/release/*.tgz --target "$RELEASE_COMMIT" --verify-tag --generate-notes
+
+  publish-gitlab:
+    if: ${{ inputs.public }}
+    needs: [validate, release, publish-github]
+    environment: verjson-ci-public-gitlab
+    permissions:
+      contents: read
+    runs-on: ${{ fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Hold GitLab promotion at the same legal boundary
+        run: |
+          test -f LICENSE || {
+            echo '::error::Issue #4 must select a license before public mirroring.'
+            exit 1
+          }
+      - name: Synchronize immutable SemVer tag to GitLab
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          GITLAB_MIRROR_URL: ${{ vars.VERJSON_CI_GITLAB_MIRROR_URL }}
+          GITLAB_TOKEN: ${{ secrets.VERJSON_CI_GITLAB_MIRROR_TOKEN }}
+        run: |
+          test -n "$GITLAB_MIRROR_URL"
+          test -n "$GITLAB_TOKEN"
+          helper="$RUNNER_TEMP/gitlab-askpass"
+          printf "#!/bin/sh\nprintf '%%s\\n' \"\$GITLAB_TOKEN\"\n" > "$helper"
+          chmod 700 "$helper"
+          GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0 node tools/mirror/sync.mjs --source "https://github.com/$GITHUB_REPOSITORY.git" --destination "$GITLAB_MIRROR_URL"
+          GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --tags "$GITLAB_MIRROR_URL" "refs/tags/$RELEASE_VERSION"
