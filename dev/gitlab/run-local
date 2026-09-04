@@ -134,7 +134,7 @@ run_scenario() {
       "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
       --output "$root/.verjson-ci/local/$scenario-gitlab.json"
   fi
-  if [[ "$scenario" = compliance-* && "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack ]]; then
+  if [[ "$scenario" = compliance-* && "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack && "$scenario" != compliance-missing-evidence ]]; then
     curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
       "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/compliance-evidence.json" \
       --output "$root/.verjson-ci/local/$scenario-gitlab-compliance.json"

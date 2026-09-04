@@ -4,6 +4,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { serializeCanonicalResult } from '../packages/result-contract/src/index.mjs';
+import { verifyMissingEvidenceBoundary } from './parity-boundary.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const options = parseArgs(process.argv.slice(2));
@@ -122,6 +123,15 @@ async function compareScenario(scenario) {
   delete gitlab.commit;
   if (serializeCanonicalResult(github) !== serializeCanonicalResult(gitlab)) {
     throw new Error(`adapter result mismatch for scenario ${scenario}`);
+  }
+  if (scenario === 'compliance-missing-evidence') {
+    verifyMissingEvidenceBoundary({
+      githubExit,
+      gitlabExit,
+      githubEvidenceExists: existsSync(resolve(directory, `${scenario}-github-compliance.json`)),
+      gitlabEvidenceExists: existsSync(resolve(directory, `${scenario}-gitlab-compliance.json`)),
+    });
+    return;
   }
   if (scenario.startsWith('compliance-')) {
     const githubEvidence = await readFile(resolve(directory, `${scenario}-github-compliance.json`), 'utf8');

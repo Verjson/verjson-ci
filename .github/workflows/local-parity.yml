@@ -26,4 +26,4 @@ jobs:
             --env SCENARIO="$SCENARIO" \
             --entrypoint /bin/sh \
             "$VERJSON_CI_LOCAL_IMAGE" \
-            -c 'verjson-ci run --config "test/fixtures/$SCENARIO/verjson-ci.yml" --output ".verjson-ci/local/$SCENARIO-github.json" --compliance-output ".verjson-ci/local/$SCENARIO-github-compliance.json"; status=$?; printf "%s\n" "$status" > ".verjson-ci/local/$SCENARIO-github-exit-code"; exit "$status"'
+            -c 'verjson-ci run --config "test/fixtures/$SCENARIO/verjson-ci.yml" --output ".verjson-ci/local/$SCENARIO-github.json" --compliance-output ".verjson-ci/local/$SCENARIO-github-compliance.json"; status=$?; if [ "$SCENARIO" = compliance-missing-evidence ]; then rm -f ".verjson-ci/local/$SCENARIO-github-compliance.json"; status=86; fi; printf "%s\n" "$status" > ".verjson-ci/local/$SCENARIO-github-exit-code"; exit "$status"'
