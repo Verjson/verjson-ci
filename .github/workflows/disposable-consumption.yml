@@ -13,6 +13,8 @@ permissions:
 jobs:
   action:
     runs-on: ubuntu-24.04
+    env:
+      VERJSON_CI_SCENARIO: success
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: ./adapters/github/action
@@ -27,3 +29,4 @@ jobs:
       image: ${{ inputs.image }}
       config: test/fixtures/success/verjson-ci.yml
       result_copy: /release-results/reusable.json
+      scenario: success
