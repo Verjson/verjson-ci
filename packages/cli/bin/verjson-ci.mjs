@@ -10,6 +10,8 @@ const args = parseArgs(process.argv.slice(2));
 
 try {
   const contract = await loadContract(args.config);
+  await mkdir(dirname(args.output), { recursive: true });
+  await mkdir(dirname(args.complianceOutput), { recursive: true });
   const result = await executeContract(contract, {
     adapterVersion: process.env.VERJSON_CI_VERSION,
     commit: process.env.VERJSON_CI_COMMIT,
@@ -19,9 +21,9 @@ try {
     provider: process.env.VERJSON_CI_PROVIDER,
     scenario: process.env.VERJSON_CI_SCENARIO,
     shadscanReportPath: resolve(dirname(args.output), 'shadscan-report.json'),
+    writeComplianceArtifact: async (bytes) => writeFile(args.complianceOutput, bytes),
   });
   const output = serializeCanonicalResult(result);
-  await mkdir(dirname(args.output), { recursive: true });
   await writeFile(args.output, output);
   process.exitCode = result.outcome === 'success' ? 0 : 1;
 } catch (error) {
@@ -34,14 +36,15 @@ function parseArgs(argv) {
     throw new Error('usage: verjson-ci run [--config path] [--output path] [--cwd path]');
   }
 
-  const values = { config: 'verjson-ci.yml', output: '.verjson-ci/result.json', cwd: process.cwd() };
+  const values = { config: 'verjson-ci.yml', output: '.verjson-ci/result.json', cwd: process.cwd(), complianceOutput: undefined };
   for (let index = 1; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!value || !['--config', '--output', '--cwd'].includes(key)) {
+    if (!value || !['--config', '--output', '--cwd', '--compliance-output'].includes(key)) {
       throw new Error(`invalid argument: ${key}`);
     }
-    values[key.slice(2)] = key === '--cwd' ? resolve(value) : resolve(value);
+    values[key === '--compliance-output' ? 'complianceOutput' : key.slice(2)] = resolve(value);
   }
+  values.complianceOutput ??= resolve(dirname(values.output), 'compliance-evidence.json');
   return values;
 }

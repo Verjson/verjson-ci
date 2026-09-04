@@ -19,8 +19,9 @@
     },
     "commands": {
       "type": "object",
-      "additionalProperties": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 4096 },
       "minProperties": 1,
+      "maxProperties": 64,
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" }
     },
     "checks": {
@@ -29,7 +30,7 @@
       "properties": {
         "changelog": { "enum": ["off", "optional", "required"] },
         "actionlint": { "enum": ["off", "auto", "required"] },
-        "shadscan": {
+      "shadscan": {
           "oneOf": [
             { "enum": ["off", "auto"] },
             {
@@ -43,8 +44,41 @@
                 "baseline": { "type": "integer", "minimum": 0, "maximum": 100 }
               }
             }
-          ]
-        }
+        ]
+      },
+      "compliance": {
+        "oneOf": [
+          { "enum": ["off", "auto"] },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["frameworks", "mode"],
+            "properties": {
+              "frameworks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["id", "version"],
+                      "properties": {
+                        "id": { "const": "verjson-ci-foundation" },
+                        "version": { "const": "1.0.0" }
+                      }
+                    }
+                  ]
+                }
+              },
+              "mode": { "enum": ["report", "required"] },
+              "baseline": { "type": "integer", "minimum": 0, "maximum": 100 }
+            }
+          }
+        ]
+      }
       }
     }
   }

@@ -19,9 +19,17 @@ spec:
     VERJSON_CI_COMMIT: $CI_COMMIT_SHA
     VERJSON_CI_CONFIG: $[[ inputs.config ]]
   script:
-    - verjson-ci run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json
+    - |
+      set +e
+      mkdir -p .verjson-ci
+      verjson-ci run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json
+      status=$?
+      printf '%s\n' "$status" > .verjson-ci/boundary-exit-code
+      exit "$status"
   artifacts:
     when: always
     paths:
       - .verjson-ci/result.json
       - .verjson-ci/shadscan-report.json
+      - .verjson-ci/compliance-evidence.json
+      - .verjson-ci/boundary-exit-code

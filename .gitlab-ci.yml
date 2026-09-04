@@ -7,3 +7,11 @@ include:
       image: $VERJSON_CI_LOCAL_IMAGE
       config: test/fixtures/$VERJSON_CI_SCENARIO/verjson-ci.yml
       job-name: parity-fixture
+
+parity-fixture:
+  after_script:
+    - |
+      if [ "$VERJSON_CI_SCENARIO" = compliance-missing-evidence ]; then
+        rm -f .verjson-ci/compliance-evidence.json
+        printf '86\n' > .verjson-ci/boundary-exit-code
+      fi

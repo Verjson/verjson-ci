@@ -17,13 +17,13 @@ jobs:
       - name: Run local candidate
         env:
           SCENARIO: ${{ inputs.scenario }}
-        run: >-
-          docker run --rm
-          --volume "$GITHUB_WORKSPACE:/workspace"
-          --workdir /workspace
-          --env VERJSON_CI_PROVIDER=github
-          --env VERJSON_CI_SCENARIO="$SCENARIO"
-          "$VERJSON_CI_LOCAL_IMAGE"
-          run
-          --config "test/fixtures/$SCENARIO/verjson-ci.yml"
-          --output ".verjson-ci/local/$SCENARIO-github.json"
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            --env VERJSON_CI_PROVIDER=github \
+            --env VERJSON_CI_SCENARIO="$SCENARIO" \
+            --env SCENARIO="$SCENARIO" \
+            --entrypoint /bin/sh \
+            "$VERJSON_CI_LOCAL_IMAGE" \
+            -c 'verjson-ci run --config "test/fixtures/$SCENARIO/verjson-ci.yml" --output ".verjson-ci/local/$SCENARIO-github.json" --compliance-output ".verjson-ci/local/$SCENARIO-github-compliance.json"; status=$?; if [ "$SCENARIO" = compliance-missing-evidence ]; then rm -f ".verjson-ci/local/$SCENARIO-github-compliance.json"; status=86; fi; printf "%s\n" "$status" > ".verjson-ci/local/$SCENARIO-github-exit-code"; exit "$status"'

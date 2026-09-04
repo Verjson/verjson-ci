@@ -6,8 +6,8 @@ local_image="${2:?local image required}"
 IFS=',' read -r -a scenarios <<<"$scenario_list"
 for scenario in "${scenarios[@]}"; do
   case "$scenario" in
-    success|failure) ;;
-    *) echo "scenario must be success or failure" >&2; exit 2 ;;
+    success|failure|compliance-success|compliance-required-failure|compliance-missing-evidence|compliance-malformed-pack|compliance-missing-pack) ;;
+    *) echo "unsupported local parity scenario: $scenario" >&2; exit 2 ;;
   esac
 done
 
@@ -111,7 +111,7 @@ run_scenario() {
     sleep 2
   done
   local expected=success
-  [ "$scenario" = failure ] && expected=failed
+  [[ "$scenario" != success && "$scenario" != compliance-success ]] && expected=failed
   if [ "$status" != "$expected" ]; then
     echo "GitLab local $scenario result=$status expected=$expected" >&2
     while IFS=$'\t' read -r job_id job_name job_status; do
@@ -127,8 +127,18 @@ run_scenario() {
     "$api/projects/$project_id/pipelines/$pipeline_id/jobs" | jq -r '.[] | select(.name == "parity-fixture") | .id')"
   [ -n "$job_id" ] || { echo "GitLab parity fixture job missing" >&2; exit 1; }
   curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
-    "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
-    --output "$root/.verjson-ci/local/$scenario-gitlab.json"
+    "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/boundary-exit-code" \
+    --output "$root/.verjson-ci/local/$scenario-gitlab-exit-code"
+  if [[ "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack ]]; then
+    curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
+      "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
+      --output "$root/.verjson-ci/local/$scenario-gitlab.json"
+  fi
+  if [[ "$scenario" = compliance-* && "$scenario" != compliance-malformed-pack && "$scenario" != compliance-missing-pack && "$scenario" != compliance-missing-evidence ]]; then
+    curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
+      "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/compliance-evidence.json" \
+      --output "$root/.verjson-ci/local/$scenario-gitlab-compliance.json"
+  fi
 }
 
 for scenario in "${scenarios[@]}"; do

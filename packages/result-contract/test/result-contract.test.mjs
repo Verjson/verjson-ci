@@ -16,3 +16,11 @@ test('canonical result retains semantic differences', () => {
 
   assert.notEqual(serializeCanonicalResult(success), serializeCanonicalResult(failure));
 });
+
+test('canonical result preserves compliance semantics while removing forge metadata', () => {
+  const compliance = { artifactDigest: `sha256:${'a'.repeat(64)}`, controls: [{ id: 'CI-COMMANDS', status: 'satisfied' }] };
+  const github = { provider: 'github', runUrl: 'https://github/runs/1', capabilities: { compliance } };
+  const gitlab = { provider: 'gitlab', runId: '2', capabilities: { compliance: structuredClone(compliance) } };
+
+  assert.equal(serializeCanonicalResult(github), serializeCanonicalResult(gitlab));
+});

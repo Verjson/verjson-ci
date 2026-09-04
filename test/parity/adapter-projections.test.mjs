@@ -3,6 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { parseAllDocuments } from 'yaml';
 
+import { executeContract } from '../../packages/engine/src/index.mjs';
+import { verifyComplianceParity } from '../../packages/compliance/src/index.mjs';
+import { serializeCanonicalResult } from '../../packages/result-contract/src/index.mjs';
+import { loadContract } from '../../packages/schema/src/index.mjs';
+
 test('adapter entrypoints are valid YAML documents', async () => {
   for (const path of [
     'adapters/github/action/action.yml',
@@ -78,4 +83,60 @@ test('GitLab pipeline variables cannot override the compiled token destination',
   assert.equal(gitlab.includes(attackerVariable.split('=')[1]), false);
   assert.match(gitlab, /const base="https:\/\/coordinator\.verjson\.org"/);
   assert.doesNotMatch(gitlab, /\$\[\[ inputs\.(?:coordinator|origin)|process\.env\.(?:VERJSON_CI_)?COORDINATOR/);
+});
+
+test('GitHub and GitLab project byte-identical compliance evidence and control semantics', async () => {
+  const cwd = 'test/fixtures/compliance-success';
+  const contract = await loadContract(`${cwd}/verjson-ci.yml`);
+  const legs = {};
+  for (const provider of ['github', 'gitlab']) {
+    let artifactBytes;
+    const result = await executeContract(contract, {
+      cwd,
+      provider,
+      stdio: 'ignore',
+      writeComplianceArtifact: async (bytes) => { artifactBytes = bytes; },
+    });
+    legs[provider] = { result, artifactBytes };
+  }
+
+  assert.equal(legs.github.artifactBytes, legs.gitlab.artifactBytes);
+  assert.equal(serializeCanonicalResult(legs.github.result), serializeCanonicalResult(legs.gitlab.result));
+});
+
+test('both projections fail closed identically for missing evidence', async () => {
+  const cwd = 'test/fixtures/compliance-missing-evidence';
+  const contract = await loadContract(`${cwd}/verjson-ci.yml`);
+  const legs = {};
+  for (const provider of ['github', 'gitlab']) {
+    let artifactBytes;
+    const result = await executeContract(contract, { cwd, provider, stdio: 'ignore', writeComplianceArtifact: async (bytes) => { artifactBytes = bytes; } });
+    legs[provider] = { result: result.capabilities.compliance, artifactBytes };
+    assert.equal(result.outcome, 'failure');
+    assert.equal(result.capabilities.compliance.controls.find(({ id }) => id === 'CI-LOCKFILE').status, 'unsatisfied');
+  }
+  assert.match(verifyComplianceParity(legs.github, legs.gitlab), /^sha256:/);
+});
+
+test('both projections reject malformed packs before producing a semantic result', async () => {
+  for (const provider of ['github', 'gitlab']) {
+    await assert.rejects(() => loadContract('test/fixtures/compliance-malformed-pack/verjson-ci.yml'), /invalid verjson-ci contract/, provider);
+  }
+});
+
+test('both projections fail closed when an exact registered pack is missing', async () => {
+  const contract = await loadContract('test/fixtures/compliance-success/verjson-ci.yml');
+  for (const provider of ['github', 'gitlab']) {
+    await assert.rejects(() => executeContract(contract, {
+      provider,
+      stdio: 'ignore',
+      writeComplianceArtifact: async () => {},
+      compliance: { readFile: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } },
+    }), /pack unavailable/, provider);
+  }
+});
+
+test('parity rejects a missing forge evidence artifact even when control results match', async () => {
+  const result = { artifactDigest: 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', controls: [] };
+  assert.throws(() => verifyComplianceParity({ result, artifactBytes: '{}' }, { result }), /evidence unavailable/);
 });

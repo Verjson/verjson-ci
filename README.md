@@ -27,11 +27,18 @@ checks:
     version: 0.17.0
     fail-under: 70
     baseline: 82
+  compliance:
+    frameworks:
+      - id: verjson-ci-foundation
+        version: 1.0.0
+    mode: report
 ```
 
 Both adapters execute this contract through the same OCI image and produce the same
 normalized `.verjson-ci/result.json`. ShadScan's complete versioned report is retained as
 `.verjson-ci/shadscan-report.json` when applicable.
+Compliance evidence is retained as `.verjson-ci/compliance-evidence.json`; see the
+[pack and enforcement contract](docs/capabilities/compliance.md).
 
 ## Local development
 

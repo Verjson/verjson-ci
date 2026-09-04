@@ -13,3 +13,27 @@ test('rejects unknown properties, altered receipts, replay IDs, and unverified r
   const { verification: _, ...unsigned } = receipt('github'); assert.throws(() => buildManifest({ ...input, receipts: { ...input.receipts, github: unsigned } }), /properties/);
 });
 test('enforces endpoint completion and state-conditional quarantine fields', () => { const staged = buildManifest(input); assert.throws(() => completeManifest(staged, REQUIRED_ENDPOINT_IDS.slice(1)), /required endpoints/); assert.equal(completeManifest(staged, REQUIRED_ENDPOINT_IDS).state, 'complete'); assert.equal(quarantineManifest(staged, 'network').quarantineReason, 'network'); assert.throws(() => validateManifest({ ...staged, quarantineReason: 'invalid' }), /schema invalid/); });
+test('binds the exact compliance pack catalog into the signed manifest', () => {
+  const manifest = buildManifest(input);
+  assert.equal(manifest.artifacts.compliance.path, 'packages/compliance/packs');
+  assert.deepEqual(manifest.artifacts.compliance.packs.map(({ id, version }) => ({ id, version })), [{ id: 'verjson-ci-foundation', version: '1.0.0' }]);
+  const tampered = structuredClone(manifest); tampered.artifacts.compliance.packs[0].digest = `sha256:${'0'.repeat(64)}`;
+  assert.throws(() => validateManifest(tampered), /catalog differs/);
+});
+test('emits v2 while retaining read and resume compatibility for durable v1 manifests', () => {
+  const current = buildManifest(input);
+  assert.equal(current.schemaVersion, 2);
+  const { compliance: _, ...legacyArtifacts } = current.artifacts;
+  const legacy = { ...current, schemaVersion: 1, artifacts: legacyArtifacts };
+  assert.equal(validateManifest(legacy), legacy);
+  const completed = completeManifest(legacy, REQUIRED_ENDPOINT_IDS);
+  assert.equal(completed.schemaVersion, 1);
+  assert.equal(completed.state, 'complete');
+});
+test('prevents v1 from claiming compliance and v2 from omitting it', () => {
+  const current = buildManifest(input);
+  assert.throws(() => validateManifest({ ...current, schemaVersion: 1 }), /schema invalid/);
+  const { compliance: _, ...artifacts } = current.artifacts;
+  assert.throws(() => validateManifest({ ...current, artifacts }), /schema invalid/);
+  assert.throws(() => validateManifest({ ...current, schemaVersion: 3 }), /unsupported schemaVersion/);
+});
