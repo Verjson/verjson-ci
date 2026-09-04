@@ -12,11 +12,14 @@
     "check": "pnpm test && pnpm parity:projections",
     "parity:local": "node dev/parity-local.mjs",
     "parity:projections": "node --test test/parity/*.test.mjs",
-    "test": "node --test packages/*/test/*.test.mjs test/contract/*.test.mjs tools/mirror/*.test.mjs"
+    "test": "node --test packages/*/test/*.test.mjs test/contract/*.test.mjs tools/mirror/*.test.mjs tools/release/*.test.mjs"
   },
   "dependencies": {
     "ajv": "8.17.1",
     "jose": "6.2.10",
     "yaml": "2.8.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

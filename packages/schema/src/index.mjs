@@ -1,11 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-
 import Ajv2020 from 'ajv/dist/2020.js';
 import { parse } from 'yaml';
-
-const schemaPath = fileURLToPath(new URL('../../../verjson-ci.schema.json', import.meta.url));
-const schema = JSON.parse(await readFile(schemaPath, 'utf8'));
+import schema from '../../../verjson-ci.schema.json' with { type: 'json' };
 const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
 
 export async function loadContract(path) {

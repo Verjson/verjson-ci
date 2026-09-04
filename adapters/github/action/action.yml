@@ -8,6 +8,10 @@ inputs:
     description: Repository-relative contract path.
     required: false
     default: verjson-ci.yml
+  scenario:
+    description: Provider-neutral scenario identity used by conformance fixtures.
+    required: false
+    default: default
 runs:
   using: composite
   steps:
@@ -31,5 +35,6 @@ runs:
         --workdir /workspace
         --env VERJSON_CI_PROVIDER=github
         --env VERJSON_CI_COMMIT="$GITHUB_SHA"
+        --env VERJSON_CI_SCENARIO="${{ inputs.scenario }}"
         "$VERJSON_CI_IMAGE"
         run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json

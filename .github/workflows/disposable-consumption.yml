@@ -1,0 +1,33 @@
+name: disposable released GitHub consumption
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    runs-on: ${{ github.repository_owner != 'Verjson' && 'ubuntu-24.04' || github.event.repository.private == true && fromJSON(vars.CI_LANE_TRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') || fromJSON(vars.CI_LANE_UNTRUSTED || vars.CI_LANE_FALLBACK || '["ubuntu-24.04"]') }}
+    env:
+      VERJSON_CI_SCENARIO: success
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./adapters/github/action
+        with:
+          image: ${{ inputs.image }}
+          config: test/fixtures/success/verjson-ci.yml
+          scenario: success
+      - run: cp .verjson-ci/result.json /release-results/action.json
+
+  reusable:
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      image: ${{ inputs.image }}
+      config: test/fixtures/success/verjson-ci.yml
+      result_copy: /release-results/reusable.json
+      scenario: success
