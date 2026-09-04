@@ -12,7 +12,8 @@ await mkdir(path.dirname(output), { recursive: true }); await mkdir(keyRoot, { r
 const resultPath = path.resolve(fixtureRoot, '.verjson-ci/local', forge === 'github' ? 'result.json' : 'success-gitlab.json');
 if (forge === 'github') {
   await mkdir(path.dirname(resultPath), { recursive: true });
-  run(process.env.ACT_BIN || 'act', ['workflow_dispatch', '--workflows', '.github/workflows/disposable-consumption.yml', '--input', `image=${image}`, '--platform', `ubuntu-24.04=${process.env.ACT_PLATFORM_IMAGE || 'catthehacker/ubuntu:act-24.04'}`]);
+  const artifactPath = path.resolve(fixtureRoot, '.act-artifacts'); await mkdir(artifactPath);
+  run(process.env.ACT_BIN || 'act', ['workflow_dispatch', '--workflows', '.github/workflows/disposable-consumption.yml', '--input', `image=${image}`, '--artifact-server-path', artifactPath, '--platform', `ubuntu-24.04=${process.env.ACT_PLATFORM_IMAGE || 'catthehacker/ubuntu:act-24.04'}`]);
 } else {
   run(path.resolve(fixtureRoot, 'dev/gitlab/run-local'), ['success', image]);
 }

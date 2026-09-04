@@ -42,8 +42,10 @@ async function prepareArtifacts() {
   const imageRepository = `localhost:${port.trim().split(':').at(-1)}/verjson-ci`;
   await execFileAsync('docker', ['tag', `verjson-ci-disposable:${version}`, `${imageRepository}:${version}`]);
   await execFileAsync('docker', ['push', `${imageRepository}:${version}`]);
-  const { stdout: repoDigest } = await execFileAsync('docker', ['image', 'inspect', '--format={{index .RepoDigests 0}}', `${imageRepository}:${version}`]);
-  const image = repoDigest.trim(); const imageDigest = image.slice(image.lastIndexOf('@') + 1);
+  const { stdout: repoDigests } = await execFileAsync('docker', ['image', 'inspect', '--format={{json .RepoDigests}}', `${imageRepository}:${version}`]);
+  const image = JSON.parse(repoDigests).find((candidate) => candidate.startsWith(`${imageRepository}@`));
+  if (!image) throw new Error('disposable registry did not return a pinned image digest');
+  const imageDigest = image.slice(image.lastIndexOf('@') + 1);
   const ociTar = path.join(sourceRoot, 'oci.tar');
   await execFileAsync('docker', ['save', '--output', ociTar, `${imageRepository}:${version}`]);
   const tagRepository = path.join(work, 'github.git'); const mirrorRepository = path.join(work, 'gitlab.git');

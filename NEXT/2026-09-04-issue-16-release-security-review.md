@@ -18,3 +18,4 @@ title: Harden unified release recovery and identity boundaries
 - Remove unused repository/package write permissions from proof execution and isolate future public endpoint permissions behind issue #4 environments.
 - Consume the immutable staged GitHub tag through real `act` Action/reusable-workflow jobs and the mirrored tag through a real disposable GitLab CE runner.
 - Derive consumption digests from independently observed adapter results and prove full successor-process recovery after an endpoint-create hard kill without overwrite.
+- Suppress GitHub artifact upload only under the local `act` harness so the reusable workflow can complete without GitHub's artifact service.
