@@ -24,6 +24,8 @@ importers:
 
   packages/cli: {}
 
+  packages/compliance: {}
+
   packages/coordinator: {}
 
   packages/engine: {}

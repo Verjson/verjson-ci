@@ -13,3 +13,10 @@ test('rejects unknown properties, altered receipts, replay IDs, and unverified r
   const { verification: _, ...unsigned } = receipt('github'); assert.throws(() => buildManifest({ ...input, receipts: { ...input.receipts, github: unsigned } }), /properties/);
 });
 test('enforces endpoint completion and state-conditional quarantine fields', () => { const staged = buildManifest(input); assert.throws(() => completeManifest(staged, REQUIRED_ENDPOINT_IDS.slice(1)), /required endpoints/); assert.equal(completeManifest(staged, REQUIRED_ENDPOINT_IDS).state, 'complete'); assert.equal(quarantineManifest(staged, 'network').quarantineReason, 'network'); assert.throws(() => validateManifest({ ...staged, quarantineReason: 'invalid' }), /schema invalid/); });
+test('binds the exact compliance pack catalog into the signed manifest', () => {
+  const manifest = buildManifest(input);
+  assert.equal(manifest.artifacts.compliance.path, 'packages/compliance/packs');
+  assert.deepEqual(manifest.artifacts.compliance.packs.map(({ id, version }) => ({ id, version })), [{ id: 'verjson-ci-foundation', version: '1.0.0' }]);
+  const tampered = structuredClone(manifest); tampered.artifacts.compliance.packs[0].digest = `sha256:${'0'.repeat(64)}`;
+  assert.throws(() => validateManifest(tampered), /catalog differs/);
+});

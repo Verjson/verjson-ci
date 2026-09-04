@@ -1,26 +1,56 @@
 import { spawn } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 
+import { ComplianceBoundaryError, evaluateCompliance } from '../../compliance/src/index.mjs';
 import { executeShadscan } from '../../shadscan/src/index.mjs';
 
 export async function executeContract(contract, options = {}) {
   const commands = [];
   const timeoutMs = options.timeoutMs ?? 15 * 60 * 1000;
+  let commandOutcome = 'success';
 
   for (const [name, command] of Object.entries(contract.commands)) {
     const result = await executeCommand(name, command, { ...options, timeoutMs });
     commands.push(result);
     if (result.outcome !== 'success') {
-      return buildResult(contract, commands, result.outcome, options);
+      commandOutcome = result.outcome;
+      break;
     }
   }
 
-  const shadscan = await executeShadscan(contract.checks?.shadscan, {
-    cwd: options.cwd,
-    reportPath: options.shadscanReportPath,
-    ...options.shadscan,
-  });
-  const outcome = shadscan.outcome === 'failure' ? 'failure' : 'success';
-  return buildResult(contract, commands, outcome, options, { shadscan });
+  const capabilities = {};
+  if (commandOutcome === 'success') {
+    capabilities.shadscan = await executeShadscan(contract.checks?.shadscan, {
+      cwd: options.cwd,
+      reportPath: options.shadscanReportPath,
+      ...options.shadscan,
+    });
+  }
+  let outcome = commandOutcome === 'success' && capabilities.shadscan?.outcome !== 'failure' ? 'success' : commandOutcome === 'success' ? 'failure' : commandOutcome;
+  const complianceConfiguration = contract.checks?.compliance;
+  if (complianceConfiguration && complianceConfiguration !== 'off') {
+    if (typeof options.writeComplianceArtifact !== 'function') throw new ComplianceBoundaryError('compliance artifact writer is required');
+    const evaluated = await evaluateCompliance(complianceConfiguration, {
+      commands,
+      capabilities,
+      files: options.complianceFiles ?? await detectDependencyFiles(options.cwd ?? process.cwd(), options.access ?? access),
+    }, options.compliance);
+    capabilities.compliance = evaluated.result;
+    await options.writeComplianceArtifact(evaluated.artifactBytes);
+    if (evaluated.failed) outcome = 'failure';
+  }
+  return buildResult(contract, commands, outcome, options, capabilities);
+}
+
+async function detectDependencyFiles(cwd, accessFile) {
+  const names = ['npm-shrinkwrap.json', 'package-lock.json', 'pnpm-lock.yaml'];
+  const present = [];
+  for (const name of names) {
+    try { await accessFile(join(cwd, name)); present.push(name); }
+    catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  }
+  return present;
 }
 
 function executeCommand(name, command, options) {

@@ -24,6 +24,6 @@ jobs:
           --env VERJSON_CI_PROVIDER=github
           --env VERJSON_CI_SCENARIO="$SCENARIO"
           "$VERJSON_CI_LOCAL_IMAGE"
-          run
-          --config "test/fixtures/$SCENARIO/verjson-ci.yml"
+          run --config "test/fixtures/$SCENARIO/verjson-ci.yml"
           --output ".verjson-ci/local/$SCENARIO-github.json"
+          --compliance-output ".verjson-ci/local/$SCENARIO-github-compliance.json"

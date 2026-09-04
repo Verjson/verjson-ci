@@ -1,0 +1,13 @@
+schema: 1
+stack: node
+runtime:
+  node: '24'
+  package-manager: pnpm
+commands:
+  test: 'true'
+checks:
+  compliance:
+    frameworks:
+      - id: unknown-framework
+        version: latest
+    mode: report

@@ -3,6 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { parseAllDocuments } from 'yaml';
 
+import { executeContract } from '../../packages/engine/src/index.mjs';
+import { serializeCanonicalResult } from '../../packages/result-contract/src/index.mjs';
+import { loadContract } from '../../packages/schema/src/index.mjs';
+
 test('adapter entrypoints are valid YAML documents', async () => {
   for (const path of [
     'adapters/github/action/action.yml',
@@ -78,4 +82,23 @@ test('GitLab pipeline variables cannot override the compiled token destination',
   assert.equal(gitlab.includes(attackerVariable.split('=')[1]), false);
   assert.match(gitlab, /const base="https:\/\/coordinator\.verjson\.org"/);
   assert.doesNotMatch(gitlab, /\$\[\[ inputs\.(?:coordinator|origin)|process\.env\.(?:VERJSON_CI_)?COORDINATOR/);
+});
+
+test('GitHub and GitLab project byte-identical compliance evidence and control semantics', async () => {
+  const cwd = 'test/fixtures/compliance-success';
+  const contract = await loadContract(`${cwd}/verjson-ci.yml`);
+  const legs = {};
+  for (const provider of ['github', 'gitlab']) {
+    let artifactBytes;
+    const result = await executeContract(contract, {
+      cwd,
+      provider,
+      stdio: 'ignore',
+      writeComplianceArtifact: async (bytes) => { artifactBytes = bytes; },
+    });
+    legs[provider] = { result, artifactBytes };
+  }
+
+  assert.equal(legs.github.artifactBytes, legs.gitlab.artifactBytes);
+  assert.equal(serializeCanonicalResult(legs.github.result), serializeCanonicalResult(legs.gitlab.result));
 });

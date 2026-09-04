@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
@@ -22,6 +22,7 @@ await build({
   define: { 'process.env.VERJSON_CI_VERSION': JSON.stringify(version) },
 });
 await chmod(`${dist}/bin/verjson-ci.mjs`, 0o755);
+await cp(`${root}/packages/compliance/packs`, `${dist}/packs`, { recursive: true });
 await writeFile(`${dist}/package.json`, `${JSON.stringify({
   name: '@verjson/ci',
   version,

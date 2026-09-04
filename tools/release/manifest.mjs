@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { FRAMEWORK_PACKS } from '../../packages/compliance/src/index.mjs';
 import schema from '../../release/manifest.schema.json' with { type: 'json' };
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -32,6 +33,7 @@ export function buildManifest(input) {
       cli: input.cli, oci: { reference: input.imageReference, digest: input.imageDigest },
       github: { path: 'adapters/github/action', ref: input.version }, gitlab: { path: 'templates/ci.yml', ref: input.version },
       schema: { path: 'verjson-ci.schema.json', version: 1 }, mirror: { terraform: 'terraform/gitlab-mirror', sync: 'tools/mirror/sync.mjs' },
+      compliance: { path: 'packages/compliance/packs', packs: FRAMEWORK_PACKS },
     }, receipts, endpoints: Object.fromEntries(REQUIRED_ENDPOINT_IDS.map((id) => [id, input.endpointDigests?.[id]])),
   };
   validateManifest(manifest);
@@ -43,12 +45,14 @@ export function validateManifest(manifest) {
   exact(manifest, ['schemaVersion', 'version', 'commit', 'state', 'artifacts', 'receipts', 'endpoints', ...(manifest?.state === 'quarantined' ? ['quarantineReason'] : [])], 'manifest');
   if (manifest.schemaVersion !== 1 || !SEMVER.test(manifest.version) || !SHA.test(manifest.commit) || !STATES.has(manifest.state)) throw new Error('invalid release manifest identity');
   if (manifest.state === 'quarantined' ? !manifest.quarantineReason : 'quarantineReason' in manifest) throw new Error('invalid quarantine state');
-  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror'], 'artifacts');
+  exact(manifest.artifacts, ['cli', 'oci', 'github', 'gitlab', 'schema', 'mirror', 'compliance'], 'artifacts');
   const { cli, oci } = manifest.artifacts;
   exact(cli, ['version', 'path', 'sha256'], 'CLI artifact');
   if (cli.version !== manifest.version || !cli.path || !HEX.test(cli.sha256)) throw new Error('CLI version or integrity differs from release');
   exact(oci, ['reference', 'digest'], 'OCI artifact');
   if (!oci.reference || !DIGEST.test(oci.digest)) throw new Error('invalid OCI artifact');
+  exact(manifest.artifacts.compliance, ['path', 'packs'], 'compliance artifact');
+  if (manifest.artifacts.compliance.path !== 'packages/compliance/packs' || canonicalBytes(manifest.artifacts.compliance.packs) !== canonicalBytes(FRAMEWORK_PACKS)) throw new Error('compliance pack catalog differs from release');
   exact(manifest.receipts, ['github', 'gitlab'], 'receipts');
   exact(manifest.endpoints, REQUIRED_ENDPOINT_IDS, 'endpoints');
   for (const id of REQUIRED_ENDPOINT_IDS) if (!DIGEST.test(manifest.endpoints[id])) throw new Error(`endpoint ${id} digest invalid`);

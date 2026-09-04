@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "verjson-ci-foundation",
+  "version": "1.0.0",
+  "controls": [
+    {
+      "id": "CI-COMMANDS",
+      "blocking": true,
+      "evidence": { "kind": "commands-all" }
+    },
+    {
+      "id": "CI-LOCKFILE",
+      "blocking": true,
+      "evidence": { "kind": "file-any", "names": ["npm-shrinkwrap.json", "package-lock.json", "pnpm-lock.yaml"] }
+    },
+    {
+      "id": "CI-SHADSCAN",
+      "blocking": false,
+      "evidence": { "kind": "capability", "name": "shadscan" }
+    }
+  ]
+}

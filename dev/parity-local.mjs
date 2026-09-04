@@ -31,7 +31,7 @@ for (const scenario of scenarios) {
     `scenario=${scenario}`,
     '--env',
     `VERJSON_CI_LOCAL_IMAGE=${image}`,
-  ], scenario === 'failure' ? 1 : 0);
+    ], scenario.endsWith('failure') ? 1 : 0);
 }
 run(resolve(root, 'dev/gitlab/run-local'), [scenarios.join(','), image]);
 for (const scenario of scenarios) await compareScenario(scenario);
@@ -54,8 +54,8 @@ function parseArgs(args) {
 }
 
 function selectScenarios({ changed, scenario }) {
-  if (scenario === 'all') return ['success', 'failure'];
-  const supported = new Set(['success', 'failure']);
+  if (scenario === 'all') return ['success', 'failure', 'compliance-success', 'compliance-required-failure'];
+  const supported = new Set(['success', 'failure', 'compliance-success', 'compliance-required-failure']);
   if (scenario) {
     if (!supported.has(scenario)) {
       throw new Error(`unknown local parity scenario: ${scenario}`);
@@ -72,7 +72,7 @@ function selectScenarios({ changed, scenario }) {
       throw new Error('could not determine changed files for local parity');
     }
     if (/verjson-ci\.schema\.json|packages\/schema\//.test(diff.stdout)) {
-      return ['success', 'failure'];
+      return ['success', 'failure', 'compliance-success', 'compliance-required-failure'];
     }
   }
   return ['success'];
@@ -114,5 +114,10 @@ async function compareScenario(scenario) {
   delete gitlab.commit;
   if (serializeCanonicalResult(github) !== serializeCanonicalResult(gitlab)) {
     throw new Error(`adapter result mismatch for scenario ${scenario}`);
+  }
+  if (scenario.startsWith('compliance-')) {
+    const githubEvidence = await readFile(resolve(directory, `${scenario}-github-compliance.json`), 'utf8');
+    const gitlabEvidence = await readFile(resolve(directory, `${scenario}-gitlab-compliance.json`), 'utf8');
+    if (githubEvidence !== gitlabEvidence) throw new Error(`adapter compliance evidence mismatch for scenario ${scenario}`);
   }
 }

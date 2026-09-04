@@ -10,25 +10,32 @@
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "state": { "enum": ["staged", "complete", "quarantined"] },
     "quarantineReason": { "type": "string", "minLength": 1 },
-    "artifacts": { "type": "object", "additionalProperties": false, "required": ["cli", "oci", "github", "gitlab", "schema", "mirror"], "properties": {
-      "cli": { "type": "object", "additionalProperties": false, "required": ["version", "path", "sha256"], "properties": { "version": { "type": "string" }, "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
-      "oci": { "type": "object", "additionalProperties": false, "required": ["reference", "digest"], "properties": { "reference": { "type": "string", "minLength": 1 }, "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } } },
-      "github": { "$ref": "#/$defs/forgeArtifact" }, "gitlab": { "$ref": "#/$defs/forgeArtifact" },
-      "schema": { "type": "object", "additionalProperties": false, "required": ["path", "version"], "properties": { "path": { "const": "verjson-ci.schema.json" }, "version": { "const": 1 } } },
-      "mirror": { "type": "object", "additionalProperties": false, "required": ["terraform", "sync"], "properties": { "terraform": { "type": "string", "minLength": 1 }, "sync": { "type": "string", "minLength": 1 } } }
-    } },
+    "artifacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cli", "oci", "github", "gitlab", "schema", "mirror", "compliance"],
+      "properties": {
+        "cli": { "type": "object", "additionalProperties": false, "required": ["version", "path", "sha256"], "properties": { "version": { "type": "string" }, "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+        "oci": { "type": "object", "additionalProperties": false, "required": ["reference", "digest"], "properties": { "reference": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/digest" } } },
+        "github": { "$ref": "#/$defs/forgeArtifact" },
+        "gitlab": { "$ref": "#/$defs/forgeArtifact" },
+        "schema": { "type": "object", "additionalProperties": false, "required": ["path", "version"], "properties": { "path": { "const": "verjson-ci.schema.json" }, "version": { "const": 1 } } },
+        "mirror": { "type": "object", "additionalProperties": false, "required": ["terraform", "sync"], "properties": { "terraform": { "type": "string", "minLength": 1 }, "sync": { "type": "string", "minLength": 1 } } },
+        "compliance": {
+          "type": "object", "additionalProperties": false, "required": ["path", "packs"],
+          "properties": {
+            "path": { "const": "packages/compliance/packs" },
+            "packs": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["id", "version", "digest"], "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/digest" } } } }
+          }
+        }
+      }
+    },
     "receipts": { "type": "object", "additionalProperties": false, "required": ["github", "gitlab"], "properties": { "github": { "$ref": "#/$defs/receipt" }, "gitlab": { "$ref": "#/$defs/receipt" } } },
-    "endpoints": { "type": "object", "additionalProperties": false, "required": ["cli", "oci", "github-action", "gitlab-component", "gitlab-mirror", "release-tag", "github-consumption", "gitlab-consumption"], "properties": {
-      "cli": { "$ref": "#/$defs/digest" }, "oci": { "$ref": "#/$defs/digest" }, "github-action": { "$ref": "#/$defs/digest" }, "gitlab-component": { "$ref": "#/$defs/digest" }, "gitlab-mirror": { "$ref": "#/$defs/digest" }, "release-tag": { "$ref": "#/$defs/digest" }, "github-consumption": { "$ref": "#/$defs/digest" }, "gitlab-consumption": { "$ref": "#/$defs/digest" }
-    } }
+    "endpoints": { "type": "object", "additionalProperties": false, "required": ["cli", "oci", "github-action", "gitlab-component", "gitlab-mirror", "release-tag", "github-consumption", "gitlab-consumption"], "properties": { "cli": { "$ref": "#/$defs/digest" }, "oci": { "$ref": "#/$defs/digest" }, "github-action": { "$ref": "#/$defs/digest" }, "gitlab-component": { "$ref": "#/$defs/digest" }, "gitlab-mirror": { "$ref": "#/$defs/digest" }, "release-tag": { "$ref": "#/$defs/digest" }, "github-consumption": { "$ref": "#/$defs/digest" }, "gitlab-consumption": { "$ref": "#/$defs/digest" } } }
   },
   "allOf": [{ "if": { "properties": { "state": { "const": "quarantined" } } }, "then": { "required": ["quarantineReason"] }, "else": { "not": { "required": ["quarantineReason"] } } }],
   "$defs": {
     "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "forgeArtifact": { "type": "object", "additionalProperties": false, "required": ["path", "ref"], "properties": { "path": { "type": "string", "minLength": 1 }, "ref": { "type": "string" } } },
-    "receipt": { "type": "object", "additionalProperties": false, "required": ["forge", "requestId", "commit", "imageDigest", "resultDigest", "verification"], "properties": {
-      "forge": { "enum": ["github", "gitlab"] }, "requestId": { "type": "string", "minLength": 1 }, "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }, "imageDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "resultDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-      "verification": { "type": "object", "additionalProperties": false, "required": ["issuer", "certificateIdentity", "bundleDigest"], "properties": { "issuer": { "type": "string", "format": "uri" }, "certificateIdentity": { "type": "string", "minLength": 1 }, "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } } }
-    } }
+    "receipt": { "type": "object", "additionalProperties": false, "required": ["forge", "requestId", "commit", "imageDigest", "resultDigest", "verification"], "properties": { "forge": { "enum": ["github", "gitlab"] }, "requestId": { "type": "string", "minLength": 1 }, "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }, "imageDigest": { "$ref": "#/$defs/digest" }, "resultDigest": { "$ref": "#/$defs/digest" }, "verification": { "type": "object", "additionalProperties": false, "required": ["issuer", "certificateIdentity", "bundleDigest"], "properties": { "issuer": { "type": "string", "format": "uri" }, "certificateIdentity": { "type": "string", "minLength": 1 }, "bundleDigest": { "$ref": "#/$defs/digest" } } } } }
   }
 }

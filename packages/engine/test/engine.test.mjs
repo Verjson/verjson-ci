@@ -48,3 +48,30 @@ test('includes ShadScan threshold semantics in the provider-neutral result', asy
     threshold: 85,
   });
 });
+
+test('projects compliance semantics and required-mode failure from existing outcomes', async () => {
+  let artifact;
+  const result = await executeContract({
+    schema: 1,
+    commands: { test: 'false' },
+    checks: {
+      compliance: {
+        frameworks: [{ id: 'verjson-ci-foundation', version: '1.0.0' }],
+        mode: 'required',
+      },
+    },
+  }, { stdio: 'ignore', writeComplianceArtifact: async (bytes) => { artifact = bytes; } });
+
+  assert.equal(result.outcome, 'failure');
+  assert.match(result.capabilities.compliance.artifactDigest, /^sha256:/);
+  assert.equal(result.capabilities.compliance.controls[0].status, 'unsatisfied');
+  assert.equal(typeof artifact, 'string');
+});
+
+test('refuses to report compliant controls when no evidence artifact can be written', async () => {
+  await assert.rejects(() => executeContract({
+    schema: 1,
+    commands: { test: 'true' },
+    checks: { compliance: { frameworks: [{ id: 'verjson-ci-foundation', version: '1.0.0' }], mode: 'report' } },
+  }, { stdio: 'ignore' }), /artifact writer is required/);
+});

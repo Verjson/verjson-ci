@@ -6,8 +6,8 @@ local_image="${2:?local image required}"
 IFS=',' read -r -a scenarios <<<"$scenario_list"
 for scenario in "${scenarios[@]}"; do
   case "$scenario" in
-    success|failure) ;;
-    *) echo "scenario must be success or failure" >&2; exit 2 ;;
+    success|failure|compliance-success|compliance-required-failure) ;;
+    *) echo "scenario must be success, failure, compliance-success, or compliance-required-failure" >&2; exit 2 ;;
   esac
 done
 
@@ -111,7 +111,7 @@ run_scenario() {
     sleep 2
   done
   local expected=success
-  [ "$scenario" = failure ] && expected=failed
+  [[ "$scenario" = failure || "$scenario" = compliance-required-failure ]] && expected=failed
   if [ "$status" != "$expected" ]; then
     echo "GitLab local $scenario result=$status expected=$expected" >&2
     while IFS=$'\t' read -r job_id job_name job_status; do
@@ -129,6 +129,11 @@ run_scenario() {
   curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
     "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/result.json" \
     --output "$root/.verjson-ci/local/$scenario-gitlab.json"
+  if [[ "$scenario" = compliance-* ]]; then
+    curl --fail --silent --show-error --header "PRIVATE-TOKEN: $api_token" \
+      "$api/projects/$project_id/jobs/$job_id/artifacts/.verjson-ci/compliance-evidence.json" \
+      --output "$root/.verjson-ci/local/$scenario-gitlab-compliance.json"
+  fi
 }
 
 for scenario in "${scenarios[@]}"; do

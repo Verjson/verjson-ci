@@ -25,3 +25,4 @@ spec:
     paths:
       - .verjson-ci/result.json
       - .verjson-ci/shadscan-report.json
+      - .verjson-ci/compliance-evidence.json

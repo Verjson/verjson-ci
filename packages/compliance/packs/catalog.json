@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "packs": [
+    {
+      "id": "verjson-ci-foundation",
+      "version": "1.0.0",
+      "path": "verjson-ci-foundation/1.0.0.json",
+      "digest": "sha256:efe1d209c9e2a48c9c4dbb824552dd2106fa3cec894cb8cbfda09e485d48af59"
+    }
+  ]
+}
