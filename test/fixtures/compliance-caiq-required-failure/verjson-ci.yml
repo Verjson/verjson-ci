@@ -4,7 +4,7 @@ runtime:
   node: '24'
   package-manager: pnpm
 commands:
-  test: 'false'
+  test: 'node --version'
 checks:
   compliance:
     frameworks:

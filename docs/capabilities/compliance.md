@@ -1,6 +1,6 @@
 # Framework-neutral compliance capability
 
-`checks.compliance` turns outcomes already produced by the portable engine into deterministic control evidence. It does not run a second scanner. `off` disables the capability, `auto` reports every bundled pack, and object form selects exact pack versions plus `report` or `required` enforcement.
+`checks.compliance` projects observations already produced by the portable engine into deterministic compliance evidence. It does not run a second scanner. `off` disables the capability, `auto` reports every bundled pack, and object form selects exact pack versions plus `report` or `required` enforcement.
 
 ```yaml
 checks:
@@ -12,13 +12,13 @@ checks:
     baseline: 66
 ```
 
-`report` records control failures without changing the run outcome. `required` fails when a blocking control is `unsatisfied` or the percentage of satisfied controls falls below `baseline`. Missing evidence becomes `not-automated`; an explicitly inapplicable capability becomes `not-applicable`. Neither state is treated as satisfied.
+`report` records findings without changing the run outcome. `required` fails when a blocking control is neither `satisfied` nor `not-applicable`, or when the percentage of satisfied controls is below `baseline`. Missing observations and manual assessments are `not-automated`; explicitly inapplicable capabilities are `not-applicable`. Neither state counts as satisfied.
 
-The CLI writes `.verjson-ci/compliance-evidence.json`. Evidence contains only normalized names, outcomes, exit status, applicability, and hashes. It excludes command text, environment values, file contents, timestamps, run identities, and provider URLs. Dependency evidence uses no-follow metadata beneath the canonical repository root and accepts regular files only; directories, symlinks, and special files fail at the boundary. Both adapters retain the file and the result envelope records its SHA-256 digest.
+The CLI writes `.verjson-ci/compliance-evidence.json` using evidence schema 2. Each framework contains control records and, when its pack declares them, generic item records projected from their parent control. Evidence excludes command text, environment values, file contents, timestamps, run identities, and provider URLs. Both adapters retain the same file and the result envelope records its SHA-256 digest.
 
 ## CSA STAR Level 1 CAIQ v4
 
-The bundled `csa-star-l1-caiq@4.0.13` pack covers all 197 CCM v4.0.13 control identifiers and binds the 261 CAIQ v4.0.3 question identifiers to their parent controls. Select it explicitly:
+The bundled `csa-star-l1-caiq@4.0.13` pack covers all 197 CCM v4.0.13 control identifiers and maps all 261 CAIQ v4.0.3 question identifiers to their parent controls. Every question identifier produces exactly one evidence item with a status, evidence digest, and concrete evidence reference in CLI, GitHub, and GitLab output.
 
 ```yaml
 checks:
@@ -29,29 +29,20 @@ checks:
     mode: required
 ```
 
-CI evidence is intentionally conservative. Quality-test commands automate `CCC-02`; static commands, ShadScan, and a regular dependency lockfile provide evidence for a small set of AIS, STA, and TVM controls. Protected changes, immutable tags, keyless signing, OIDC identity, signed receipts, exported evidence, and OCI digest binding remain named capability evidence until the runtime observes them. Every other control reports `not-automated` with an accountable `human-*` owner in its evidence reference. `CCC-02` is the sole blocking control, so a command regression fails in `required` mode while `report` mode remains observational.
+Automation is intentionally conservative. Only specifically modeled runtime observations can satisfy a control. ShadScan currently supplies trustworthy evidence for `AIS-05`. `CCC-02` is the sole blocking control and requires the named `required-checks` observation; an unrelated successful command cannot satisfy it. Protected changes, immutable tags, keyless signing, OIDC identity, signed receipts, exported evidence, and OCI digest binding remain named capabilities and report `not-automated` until adapters emit those observations. Every other control is a manual assessment with an accountable `human-*` evidence reference and explicit reason.
 
-The pack redistributes identifiers and Verjson-authored mappings only. It does not redistribute CSA control specifications or question text. The 4.0.13 control identifiers come from CSA's [CC0 public dataset](https://github.com/CloudSecurityAlliance-DataSets/dataset-public-laws-regulations-standards/tree/74ff4b828e60531d70a3d173784231f8a882a18c/control/cloudsecurityalliance.org/ccm/4.0.13); source URLs, license URL, and retrieval digests are embedded in the pack. CSA's [official v4 artifact page](https://cloudsecurityalliance.org/artifacts/cloud-controls-matrix-v4) identifies v4.0.13 and explains which workbook is valid for STAR submission. CSA separately states that product or commercial use of CCM content requires a license, so adopters must obtain and retain the licensed questionnaire text themselves.
+The pack redistributes identifiers and Verjson-authored mappings only; it does not redistribute CSA control specifications or questionnaire text. Both identifier sets are derived from CSA's commit-pinned [official CC0 dataset](https://github.com/CloudSecurityAlliance-DataSets/dataset-public-laws-regulations-standards/tree/74ff4b828e60531d70a3d173784231f8a882a18c/control/cloudsecurityalliance.org). The exact source URLs, CC0 license URL, and SHA-256 digests are embedded in pack provenance. CSA separately governs questionnaire text and commercial use through its [official CCM v4 artifact page](https://cloudsecurityalliance.org/artifacts/cloud-controls-matrix-v4); adopters must obtain and retain any separately licensed text themselves.
 
-To reproduce the data file, download the two exact inputs named in `provenance`, verify their recorded SHA-256 values, and run `node scripts/build-caiq-pack.mjs /path/to/ccm-4.0.13.json /path/to/caiq-4.0.3.json`. The builder rejects changed digests, unexpected counts, duplicate IDs, and CAIQ questions whose parent control is absent.
+To reproduce the data file, download the two exact inputs named in `provenance`, verify their recorded SHA-256 values, then run:
+
+```sh
+node scripts/build-caiq-pack.mjs /path/to/ccm-4.0.13.json /path/to/caiq-4.0.3.csv
+```
+
+The builder rejects changed digests, unexpected counts, duplicate item IDs, and items whose parent control is absent.
 
 ## Pack authoring
 
-Packs live at `packages/compliance/packs/<id>/<version>.json` and are registered in `packages/compliance/packs/catalog.json` with an exact SemVer and SHA-256 digest. Paths are derived from the validated ID and version; contracts cannot supply a path or URL. The release manifest signs the exact catalog identities and digests, and the OCI image carries the same files.
+Packs live at `packages/compliance/packs/<id>/<version>.json`; `packages/compliance/packs/catalog.json` binds each exact identity and SHA-256 digest. Supported neutral mappings are `commands-all`, `file-any` with a bounded filename allowlist, `capability` with a named observation, and `manual` with a bounded owner and reason. Framework-specific interpretation belongs in pack data, not in adapters.
 
-A pack has a closed shape:
-
-```json
-{
-  "schema": 1,
-  "id": "example-framework",
-  "version": "1.2.3",
-  "controls": [
-    { "id": "EXAMPLE-1", "blocking": true, "evidence": { "kind": "commands-all" } }
-  ]
-}
-```
-
-Supported neutral mappings are `commands-all`, `file-any` with a bounded filename allowlist, and `capability` with a capability name. Add a framework by adding pack data, registering its digest, and exposing its exact identity in `verjson-ci.schema.json`; the engine and adapters do not change. Framework-specific interpretation belongs in pack data, not the resolver.
-
-Pack changes require schema, malformed-boundary, missing-pack, success, required-failure, missing-evidence, and GitHub/GitLab projection tests. The local `act` and disposable GitLab CE matrix records the inner CLI exit code: malformed pack declarations and absent registered packs exit 2 without a semantic result, while ordinary required missing evidence exits 1 with matching unsatisfied controls. For the exact checked-in `compliance-missing-evidence` local fixture only, each harness deletes the evidence after CLI execution and replaces the inner verdict with boundary exit 86. Both absent artifacts count as the expected negative test only when both independent legs carry that verdict; default and consumer adapters expose no injection input or environment switch. The parity boundary otherwise requires both evidence artifacts to exist, verifies each digest, and then compares canonical bytes and control semantics. An absent pack, missing artifact, single forge leg, or digest mismatch fails closed.
+A pack change requires schema, semantic-boundary, missing-pack, success, required-failure, missing-evidence, CLI packaging, and GitHub/GitLab projection tests. The local `act` plus disposable GitLab CE matrix verifies identical results and artifact bytes. Missing artifacts, a single forge leg, digest mismatches, and malformed packs fail closed.

@@ -33,7 +33,13 @@ test('standalone CLI archive embeds and reports the unified release version', as
     assert.deepEqual(result.capabilities.compliance.frameworks.map(({ id, version }) => ({ id, version })), [
       { id: 'csa-star-l1-caiq', version: '4.0.13' },
     ]);
-    assert.equal(typeof await readFile(join(directory, 'compliance-evidence.json'), 'utf8'), 'string');
+    assert.equal(result.capabilities.compliance.items.length, 261);
+    assert.equal(new Set(result.capabilities.compliance.items.map(({ id }) => id)).size, 261);
+    assert.equal(result.capabilities.compliance.frameworks[0].itemCoverage.total, 261);
+    const evidence = JSON.parse(await readFile(join(directory, 'compliance-evidence.json'), 'utf8'));
+    assert.equal(evidence.schema, 2);
+    assert.equal(evidence.frameworks[0].items.length, 261);
+    assert.equal(new Set(evidence.frameworks[0].items.map(({ id }) => id)).size, 261);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

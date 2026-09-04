@@ -137,5 +137,18 @@ async function compareScenario(scenario) {
     const githubEvidence = await readFile(resolve(directory, `${scenario}-github-compliance.json`), 'utf8');
     const gitlabEvidence = await readFile(resolve(directory, `${scenario}-gitlab-compliance.json`), 'utf8');
     if (githubEvidence !== gitlabEvidence) throw new Error(`adapter compliance evidence mismatch for scenario ${scenario}`);
+    if (scenario.startsWith('compliance-caiq-')) verifyCaiqEvidence(githubEvidence, scenario);
+  }
+}
+
+function verifyCaiqEvidence(bytes, scenario) {
+  const artifact = JSON.parse(bytes);
+  const framework = artifact.frameworks?.find(({ id }) => id === 'csa-star-l1-caiq');
+  if (artifact.schema !== 2 || framework?.items?.length !== 261 || framework.itemCoverage?.total !== 261) {
+    throw new Error(`CAIQ evidence coverage incomplete for scenario ${scenario}`);
+  }
+  if (new Set(framework.items.map(({ id }) => id)).size !== 261
+    || framework.items.some(({ status, evidence }) => typeof status !== 'string' || typeof evidence?.ref !== 'string')) {
+    throw new Error(`CAIQ evidence records malformed for scenario ${scenario}`);
   }
 }

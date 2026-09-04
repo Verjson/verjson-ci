@@ -59,25 +59,39 @@ export async function evaluateCompliance(configuration, observations, options = 
   for (const reference of normalized.frameworks) {
     const pack = await loadFrameworkPack(reference, options);
     const controls = pack.controls.map((control) => evaluateControl(control, observations));
-    frameworks.push({ id: pack.id, version: pack.version, packDigest: pack.digest, controls, coverage: coverage(controls) });
+    const controlsById = new Map(controls.map((control) => [control.id, control]));
+    const items = (pack.items ?? []).map((item) => evaluateItem(item, controlsById));
+    frameworks.push({
+      id: pack.id,
+      version: pack.version,
+      packDigest: pack.digest,
+      controls,
+      items,
+      coverage: coverage(controls),
+      itemCoverage: coverage(items),
+    });
   }
-  const artifact = { schema: 1, frameworks };
+  const artifact = { schema: 2, frameworks };
   const artifactBytes = `${canonicalBytes(artifact)}\n`;
   const artifactDigest = sha256(artifactBytes);
   const controls = frameworks.flatMap((framework) => framework.controls.map((control) => ({
     framework: framework.id, frameworkVersion: framework.version, id: control.id, blocking: control.blocking,
     status: control.status, evidenceDigest: control.evidenceDigest, evidence: control.evidence,
   })));
+  const items = frameworks.flatMap((framework) => framework.items.map((item) => ({
+    framework: framework.id, frameworkVersion: framework.version, id: item.id, controlId: item.controlId,
+    status: item.status, evidenceDigest: item.evidenceDigest, evidence: item.evidence,
+  })));
   const satisfiedPercent = controls.length === 0 ? 0 : Math.floor((controls.filter(({ status }) => status === 'satisfied').length * 100) / controls.length);
-  const blockingFailure = controls.some(({ blocking, status }) => blocking && status === 'unsatisfied');
+  const blockingFailure = controls.some(({ blocking, status }) => blocking && status !== 'satisfied' && status !== 'not-applicable');
   const baselineFailure = normalized.baseline !== undefined && satisfiedPercent < normalized.baseline;
   return {
     artifactBytes,
     failed: normalized.mode === 'required' && (blockingFailure || baselineFailure),
     result: {
       mode: normalized.mode, baseline: normalized.baseline, artifactDigest, satisfiedPercent,
-      frameworks: frameworks.map(({ id, version, packDigest, coverage: value }) => ({ id, version, packDigest, coverage: value })),
-      controls,
+      frameworks: frameworks.map(({ id, version, packDigest, coverage: value, itemCoverage }) => ({ id, version, packDigest, coverage: value, itemCoverage })),
+      controls, items,
     },
   };
 }
@@ -96,6 +110,11 @@ function evaluateControl(control, observations) {
   return { id: control.id, blocking: control.blocking, status: evidence.status, evidenceDigest: sha256(canonicalBytes(evidence)), evidence };
 }
 
+function evaluateItem(item, controlsById) {
+  const control = controlsById.get(item.controlId);
+  return { id: item.id, controlId: item.controlId, status: control.status, evidenceDigest: control.evidenceDigest, evidence: control.evidence };
+}
+
 function resolveEvidence(mapping, observations) {
   if (mapping.kind === 'commands-all') {
     const commands = observations.commands ?? [];
@@ -107,8 +126,9 @@ function resolveEvidence(mapping, observations) {
     const present = [...new Set(observations.files ?? [])].filter((name) => mapping.names.includes(name)).sort();
     return evidence('file-any', 'dependency-lockfile', present.length > 0 ? 'satisfied' : 'unsatisfied', { present });
   }
+  if (mapping.kind === 'manual') return evidence('manual', mapping.owner, 'not-automated', { reason: mapping.reason });
   const capability = observations.capabilities?.[mapping.name];
-  if (!capability) return evidence('capability', mapping.name, 'not-automated', { applicable: null, outcome: null });
+  if (!capability) return evidence('capability', mapping.name, 'not-automated', { applicable: null, outcome: null, reason: 'observation-unavailable' });
   if (capability.applicable === false) return evidence('capability', mapping.name, 'not-applicable', { applicable: false, outcome: capability.outcome ?? null });
   return evidence('capability', mapping.name, capability.outcome === 'success' ? 'satisfied' : 'unsatisfied', { applicable: capability.applicable ?? true, outcome: capability.outcome ?? null });
 }
@@ -119,8 +139,8 @@ function coverage(controls) {
 }
 
 function validatePack(pack, reference) {
-  const hasQuestionCatalog = pack?.provenance !== undefined || pack?.questions !== undefined;
-  exact(pack, hasQuestionCatalog ? ['schema', 'id', 'version', 'provenance', 'controls', 'questions'] : ['schema', 'id', 'version', 'controls'], 'pack');
+  const hasItemCatalog = pack?.provenance !== undefined || pack?.items !== undefined;
+  exact(pack, hasItemCatalog ? ['schema', 'id', 'version', 'provenance', 'controls', 'items'] : ['schema', 'id', 'version', 'controls'], 'pack');
   if (pack.schema !== 1 || pack.id !== reference.id || pack.version !== reference.version || !Array.isArray(pack.controls) || pack.controls.length === 0 || pack.controls.length > 2048) throw new CompliancePackError('compliance framework pack identity malformed');
   const ids = new Set();
   for (const control of pack.controls) {
@@ -129,31 +149,37 @@ function validatePack(pack, reference) {
     ids.add(control.id);
     validateMapping(control.evidence);
   }
-  if (hasQuestionCatalog) validateQuestionCatalog(pack.provenance, pack.questions, ids);
+  if (hasItemCatalog) validateItemCatalog(pack.provenance, pack.items, ids);
 }
 
-function validateQuestionCatalog(provenance, questions, controlIds) {
-  exact(provenance, ['owner', 'controlCatalogLicense', 'licenseUrl', 'controlCatalogUrl', 'controlCatalogSha256', 'caiqUrl', 'caiqQuestionIdsRetrievedFrom', 'caiqQuestionIdsSha256'], 'pack provenance');
-  const urls = [provenance.licenseUrl, provenance.controlCatalogUrl, provenance.caiqUrl, provenance.caiqQuestionIdsRetrievedFrom];
+function validateItemCatalog(provenance, items, controlIds) {
+  exact(provenance, ['owner', 'datasetLicense', 'licenseUrl', 'controlCatalogUrl', 'controlCatalogSha256', 'itemCatalogUrl', 'itemCatalogSha256'], 'pack provenance');
+  const urls = [provenance.licenseUrl, provenance.controlCatalogUrl, provenance.itemCatalogUrl];
   if (typeof provenance.owner !== 'string' || provenance.owner.length < 1 || provenance.owner.length > 128
-    || !/^[A-Za-z0-9.-]{1,64}$/.test(provenance.controlCatalogLicense)
-    || !urls.every((value) => URL.canParse(value) && new URL(value).protocol === 'https:')
-    || !/^[0-9a-f]{64}$/.test(provenance.controlCatalogSha256) || !/^[0-9a-f]{64}$/.test(provenance.caiqQuestionIdsSha256)) {
+    || !/^[A-Za-z0-9.-]{1,64}$/.test(provenance.datasetLicense)
+    || !urls.every((value) => typeof value === 'string' && value.length <= 2048 && URL.canParse(value)
+      && new URL(value).protocol === 'https:' && !new URL(value).username && !new URL(value).password)
+    || !/^[0-9a-f]{64}$/.test(provenance.controlCatalogSha256) || !/^[0-9a-f]{64}$/.test(provenance.itemCatalogSha256)) {
     throw new CompliancePackError('compliance framework pack provenance malformed');
   }
-  if (!Array.isArray(questions) || questions.length === 0 || questions.length > 4096) throw new CompliancePackError('compliance framework question catalog malformed');
+  if (!Array.isArray(items) || items.length === 0 || items.length > 4096) throw new CompliancePackError('compliance framework item catalog malformed');
   const ids = new Set();
-  for (const question of questions) {
-    exact(question, ['id', 'controlId'], 'question');
-    if (!/^[A-Z][A-Z0-9&-]{1,15}-\d{2}\.\d{1,3}$/.test(question.id) || ids.has(question.id)
-      || !controlIds.has(question.controlId) || !question.id.startsWith(`${question.controlId}.`)) {
-      throw new CompliancePackError('compliance framework question malformed');
+  for (const item of items) {
+    exact(item, ['id', 'controlId'], 'item');
+    if (!/^[A-Z][A-Z0-9&.-]{1,63}$/.test(item.id) || ids.has(item.id)
+      || !controlIds.has(item.controlId)) {
+      throw new CompliancePackError('compliance framework item malformed');
     }
-    ids.add(question.id);
+    ids.add(item.id);
   }
 }
 
 function validateMapping(mapping) {
+  if (mapping?.kind === 'manual') {
+    exact(mapping, ['kind', 'owner', 'reason'], 'manual evidence mapping');
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(mapping.owner) || typeof mapping.reason !== 'string' || mapping.reason.length < 1 || mapping.reason.length > 256) throw new CompliancePackError('manual evidence mapping malformed');
+    return;
+  }
   if (mapping?.kind === 'commands-all') return exact(mapping, ['kind'], 'command evidence mapping');
   if (mapping?.kind === 'file-any') {
     exact(mapping, ['kind', 'names'], 'file evidence mapping');

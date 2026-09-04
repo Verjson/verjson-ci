@@ -113,6 +113,14 @@ test('both adapters project byte-identical CAIQ success and required-failure evi
       let artifactBytes;
       const result = await executeContract(contract, { cwd, provider, stdio: 'ignore', writeComplianceArtifact: async (bytes) => { artifactBytes = bytes; } });
       legs[provider] = { result: result.capabilities.compliance, artifactBytes };
+      const evidence = JSON.parse(artifactBytes);
+      assert.equal(result.capabilities.compliance.items.length, 261, `${fixture}:${provider}:result-items`);
+      assert.equal(new Set(result.capabilities.compliance.items.map(({ id }) => id)).size, 261, `${fixture}:${provider}:unique-result-items`);
+      assert.equal(result.capabilities.compliance.frameworks[0].itemCoverage.total, 261, `${fixture}:${provider}:result-coverage`);
+      assert.equal(evidence.frameworks[0].items.length, 261, `${fixture}:${provider}:artifact-items`);
+      assert.equal(new Set(evidence.frameworks[0].items.map(({ id }) => id)).size, 261, `${fixture}:${provider}:unique-artifact-items`);
+      assert.equal(evidence.frameworks[0].itemCoverage.total, 261, `${fixture}:${provider}:artifact-coverage`);
+      assert.equal(evidence.frameworks[0].items.every(({ status, evidence: itemEvidence }) => typeof status === 'string' && typeof itemEvidence?.ref === 'string'), true, `${fixture}:${provider}:complete-item-evidence`);
     }
     assert.equal(legs.github.artifactBytes, legs.gitlab.artifactBytes, fixture);
     assert.match(verifyComplianceParity(legs.github, legs.gitlab), /^sha256:/, fixture);
