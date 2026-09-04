@@ -19,9 +19,11 @@ jobs:
         with:
           image: ${{ inputs.image }}
           config: test/fixtures/success/verjson-ci.yml
+      - run: cp .verjson-ci/result.json /release-results/action.json
 
   reusable:
     uses: ./.github/workflows/reusable-ci.yml
     with:
       image: ${{ inputs.image }}
       config: test/fixtures/success/verjson-ci.yml
+      result_copy: /release-results/reusable.json

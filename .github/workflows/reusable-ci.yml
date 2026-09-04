@@ -12,6 +12,11 @@ on:
         required: false
         default: verjson-ci.yml
         type: string
+      result_copy:
+        description: Optional absolute path used only by disposable conformance harnesses.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +46,11 @@ jobs:
           --env VERJSON_CI_COMMIT="$GITHUB_SHA"
           "$VERJSON_CI_IMAGE"
           run --config "$VERJSON_CI_CONFIG" --output .verjson-ci/result.json
+      - name: Copy disposable conformance result
+        if: ${{ inputs.result_copy != '' }}
+        env:
+          RESULT_COPY: ${{ inputs.result_copy }}
+        run: cp .verjson-ci/result.json "$RESULT_COPY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() && !env.ACT }}
         with:

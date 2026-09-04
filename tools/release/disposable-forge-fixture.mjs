@@ -9,11 +9,16 @@ import { serializeCanonicalResult } from '../../packages/result-contract/src/ind
 const [forge, image, imageDigest, commit, requestId, output, keyRoot, fixtureRoot = process.cwd()] = process.argv.slice(2);
 if (!['github', 'gitlab'].includes(forge) || !output || !keyRoot) throw new Error('usage: disposable-forge-fixture.mjs FORGE IMAGE IMAGE_DIGEST COMMIT REQUEST_ID OUTPUT KEY_ROOT');
 await mkdir(path.dirname(output), { recursive: true }); await mkdir(keyRoot, { recursive: true });
-const resultPath = path.resolve(fixtureRoot, '.verjson-ci/local', forge === 'github' ? 'result.json' : 'success-gitlab.json');
+let resultPath = path.resolve(fixtureRoot, '.verjson-ci/local', forge === 'github' ? 'result.json' : 'success-gitlab.json');
 if (forge === 'github') {
   await mkdir(path.dirname(resultPath), { recursive: true });
   const artifactPath = path.resolve(fixtureRoot, '.act-artifacts'); await mkdir(artifactPath);
-  run(process.env.ACT_BIN || 'act', ['workflow_dispatch', '--workflows', '.github/workflows/disposable-consumption.yml', '--input', `image=${image}`, '--artifact-server-path', artifactPath, '--platform', `ubuntu-24.04=${process.env.ACT_PLATFORM_IMAGE || 'catthehacker/ubuntu:act-24.04'}`]);
+  run(process.env.ACT_BIN || 'act', ['workflow_dispatch', '--bind', '--workflows', '.github/workflows/disposable-consumption.yml', '--input', `image=${image}`, '--container-options', `--volume ${artifactPath}:/release-results`, '--platform', `ubuntu-24.04=${process.env.ACT_PLATFORM_IMAGE || 'catthehacker/ubuntu:act-24.04'}`]);
+  const action = JSON.parse(await readFile(path.join(artifactPath, 'action.json'), 'utf8'));
+  const reusable = JSON.parse(await readFile(path.join(artifactPath, 'reusable.json'), 'utf8'));
+  delete action.commit; delete reusable.commit;
+  if (serializeCanonicalResult(action) !== serializeCanonicalResult(reusable)) throw new Error('GitHub Action and reusable workflow results differ');
+  resultPath = path.join(artifactPath, 'reusable.json');
 } else {
   run(path.resolve(fixtureRoot, 'dev/gitlab/run-local'), ['success', image]);
 }
