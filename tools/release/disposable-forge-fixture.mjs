@@ -17,7 +17,8 @@ if (forge === 'github') {
   const action = JSON.parse(await readFile(path.join(artifactPath, 'action.json'), 'utf8'));
   const reusable = JSON.parse(await readFile(path.join(artifactPath, 'reusable.json'), 'utf8'));
   delete action.commit; delete reusable.commit;
-  if (serializeCanonicalResult(action) !== serializeCanonicalResult(reusable)) throw new Error('GitHub Action and reusable workflow results differ');
+  const actionCanonical = serializeCanonicalResult(action); const reusableCanonical = serializeCanonicalResult(reusable);
+  if (actionCanonical !== reusableCanonical) throw new Error(`GitHub Action and reusable workflow results differ: ${actionCanonical} != ${reusableCanonical}`);
   resultPath = path.join(artifactPath, 'reusable.json');
 } else {
   run(path.resolve(fixtureRoot, 'dev/gitlab/run-local'), ['success', image]);

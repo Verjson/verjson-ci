@@ -19,3 +19,4 @@ title: Harden unified release recovery and identity boundaries
 - Consume the immutable staged GitHub tag through real `act` Action/reusable-workflow jobs and the mirrored tag through a real disposable GitLab CE runner.
 - Derive consumption digests from independently observed adapter results and prove full successor-process recovery after an endpoint-create hard kill without overwrite.
 - Suppress GitHub artifact upload only under the local `act` harness so the reusable workflow can complete without GitHub's artifact service.
+- Pass the provider-neutral conformance scenario through both GitHub adapter surfaces so their independently observed consumption results are identical.

@@ -21,6 +21,7 @@ jobs:
         with:
           image: ${{ inputs.image }}
           config: test/fixtures/success/verjson-ci.yml
+          scenario: success
       - run: cp .verjson-ci/result.json /release-results/action.json
 
   reusable:
