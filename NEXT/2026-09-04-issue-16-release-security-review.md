@@ -20,3 +20,4 @@ title: Harden unified release recovery and identity boundaries
 - Derive consumption digests from independently observed adapter results and prove full successor-process recovery after an endpoint-create hard kill without overwrite.
 - Suppress GitHub artifact upload only under the local `act` harness so the reusable workflow can complete without GitHub's artifact service.
 - Pass the provider-neutral conformance scenario through both GitHub adapter surfaces so their independently observed consumption results are identical.
+- Route the disposable GitHub consumption proof through canonical portable runner lanes while retaining a GitHub-hosted fallback for external adopters.
