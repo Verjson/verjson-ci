@@ -11,6 +11,10 @@ import { canonicalBytes, validateManifest } from './manifest.mjs';
 const execFileAsync = promisify(execFile);
 export const RELEASE_SIGNING_POLICY = Object.freeze({
   issuer: 'https://token.actions.githubusercontent.com',
+  identity: 'https://github.com/Verjson/verjson-ci/.github/workflows/unified-release.yml@refs/heads/main',
+});
+export const LEGACY_RELEASE_SIGNING_POLICY = Object.freeze({
+  issuer: RELEASE_SIGNING_POLICY.issuer,
   identity: 'https://github.com/Verjson/verjson-ci/.github/workflows/release.yml@refs/heads/main',
 });
 export const RECEIPT_POLICIES = Object.freeze({
@@ -19,10 +23,13 @@ export const RECEIPT_POLICIES = Object.freeze({
 });
 
 export async function signManifest({ manifest, bundle }, run = runCosign) {
-  await withManifestSnapshot(manifest, async (snapshot) => run(['sign-blob', '--yes', '--bundle', bundle, snapshot])); return bundle;
+  await withManifestSnapshot(manifest, async (snapshot, schemaVersion) => {
+    if (schemaVersion !== 2) throw new Error('legacy release manifests are read-only');
+    await run(['sign-blob', '--yes', '--bundle', bundle, snapshot]);
+  }); return bundle;
 }
 export async function verifyManifest({ manifest, bundle }, run = runCosign) {
-  await withManifestSnapshot(manifest, async (snapshot) => verifyBlob(snapshot, bundle, RELEASE_SIGNING_POLICY, run));
+  await withManifestSnapshot(manifest, async (snapshot, schemaVersion) => verifyBlob(snapshot, bundle, schemaVersion === 1 ? LEGACY_RELEASE_SIGNING_POLICY : RELEASE_SIGNING_POLICY, run));
 }
 
 export async function verifyReceiptEnvelope(forge, envelope, expected, run = runCosign) {
@@ -49,9 +56,9 @@ async function verifyBlob(blob, bundle, policy, run) {
 async function withManifestSnapshot(file, action) {
   const directory = await mkdtemp(path.join(tmpdir(), 'verjson-ci-manifest-'));
   try {
-    const bytes = await readFile(file); validateManifest(JSON.parse(bytes));
+    const bytes = await readFile(file); const manifest = validateManifest(JSON.parse(bytes));
     const snapshot = path.join(directory, 'manifest.json'); await writeFile(snapshot, bytes, { flag: 'wx', mode: 0o600 });
-    await action(snapshot);
+    await action(snapshot, manifest.schemaVersion);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 async function runCosign(args) { await execFileAsync(process.env.COSIGN_BIN || 'cosign', args, { env: process.env }); }
