@@ -26,3 +26,24 @@ The reusable core is published under the repository's root Apache-2.0 license.
 The release workflow no longer carries a temporary license-decision gate. Any future
 non-Apache capability must satisfy the isolation and metadata requirements in
 [`LICENSING.md`](../../LICENSING.md) before entering the release graph.
+
+## Canonical snapshot prerequisite
+
+First dispatch `.github/workflows/release.yml` with `prefix: snapshot-v` and
+`version: snapshot-v1.2.3` (substitute the intended version). Its verification
+hook rejects other prefixes. The canonical caller consumes selected NEXT
+fragments and publishes internal snapshot notes. This GitHub Release is not
+evidence of public publication completion.
+
+After that workflow succeeds, dispatch `.github/workflows/unified-release.yml`
+with `version: 1.2.3`, `commit` equal to the annotated snapshot tag's peeled
+commit, and the intended `public` setting. The commit must still be protected
+main HEAD. The candidate gate verifies the exact snapshot tag and notes before
+the signed coordinated protocol runs. If main advanced, never retarget the
+snapshot or bypass the head gate. No workflow chains publication automatically.
+
+Use the signed complete manifest and endpoint receipts to establish public
+availability; do not use GitHub's generic latest-release selection. Public
+versions and mirrored tags remain unprefixed. See
+[ADR 0001](../decisions/0001-canonical-snapshots-and-unified-publication/README.md)
+for identity compatibility and the two-stage recovery boundary.

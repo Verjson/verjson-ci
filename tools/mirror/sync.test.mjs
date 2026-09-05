@@ -4,7 +4,7 @@ import { parseTags, planSync, syncMirrors } from './sync.mjs';
 
 test('discovers only unprefixed SemVer tags', () => {
   const accepted = ['0.0.0', '1.2.3', '1.2.3-0', '1.2.3-alpha.1', '1.2.3-0A', '1.2.3+build.01', '1.2.3-alpha+build'];
-  const rejected = ['v1.2.3', '1.2', '01.2.3', '1.2.3-01', '1.2.3-alpha..1', '1.2.3-', '1.2.3+'];
+  const rejected = ['snapshot-v1.2.3', 'snapshot-v1.2.3-rc.1', 'v1.2.3', '1.2', '01.2.3', '1.2.3-01', '1.2.3-alpha..1', '1.2.3-', '1.2.3+'];
   const lines = [...accepted, ...rejected].map((tag, index) => `${index}\trefs/tags/${tag}`);
   lines.push(`peeled\trefs/tags/${accepted[0]}^{}`);
   assert.deepEqual([...parseTags(`${lines.join('\n')}\n`).keys()], accepted);
